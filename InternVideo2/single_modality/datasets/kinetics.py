@@ -16,6 +16,8 @@ from .video_transforms import (
     horizontal_flip, random_short_side_scale_jitter, uniform_crop, 
 )
 from .volume_transforms import ClipToTensor
+from torchvision.transforms import v2 
+from torchvision import tv_tensors
 
 try:
     from petrel_client.client import Client
@@ -66,6 +68,29 @@ class VideoClsDataset(Dataset):
         if has_client:
             self.client = Client('~/petreloss.conf')
 
+        self.data_transform = Compose([
+                Resize(self.short_side_size, interpolation='bilinear'),
+                CenterCrop(size=(self.crop_size, self.crop_size)),
+                ClipToTensor(),
+                Normalize(mean=[0.485, 0.456, 0.406],
+                                           std=[0.229, 0.224, 0.225])
+            ])
+        
+
+        self.custom_pipeline = v2.Compose([
+            # v2.ToDtype(torch.float32, scale=True),
+            Resize(self.short_side_size, interpolation='bilinear'),
+            ClipToTensor(), # CTHW
+            lambda x: tv_tensors.Video(x.permute(1, 0, 2, 3)), # TCHW
+            v2.RandomResizedCrop(size=(self.short_side_size, self.short_side_size), scale=(0.9, 1.1), ratio=(1, 1), antialias=True),
+            v2.RandomHorizontalFlip(p=0.5),
+            v2.RandomRotation(30),
+            v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0, hue=0),
+            v2.GaussianNoise(0, 0.03),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            lambda x: x.permute(1, 0, 2, 3) # CTHW
+        ])
+
         if (mode == 'train'):
             pass
 
@@ -98,11 +123,13 @@ class VideoClsDataset(Dataset):
                         self.test_seg.append((ck, cp))
 
     def __getitem__(self, index):
+        # print("AAA")
         if self.mode == 'train':
             args = self.args 
             scale_t = 1
 
             sample = self.dataset_samples[index]
+            # print('t')
             buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
@@ -111,10 +138,10 @@ class VideoClsDataset(Dataset):
                     sample = self.dataset_samples[index]
                     buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t)
 
-            if args.num_sample > 1:
+            if False and args.num_sample > 1:
                 frame_list = []
                 label_list = []
-                index_list = []
+                index_returnlist = []
                 for _ in range(args.num_sample):
                     new_frames = self._aug_frame(buffer, args)
                     label = self.label_array[index]
@@ -124,7 +151,7 @@ class VideoClsDataset(Dataset):
                 return frame_list, label_list, index_list, {}
             else:
                 buffer = self._aug_frame(buffer, args)
-            
+            # buffer = self.data_transform(buffer)
             return buffer, self.label_array[index], index, {}
 
         elif self.mode == 'validation':
@@ -179,6 +206,10 @@ class VideoClsDataset(Dataset):
         buffer,
         args,
     ):
+        if args.my_aug_type == "no_aug":
+            return self.data_transform(buffer)
+        elif args.my_aug_type == "custom":
+            return self.custom_pipeline(buffer)
 
         aug_transform = create_random_augment(
             input_size=(self.crop_size, self.crop_size),
@@ -192,6 +223,9 @@ class VideoClsDataset(Dataset):
 
         buffer = aug_transform(buffer)
 
+        if args.my_aug_type == "aa":
+            return self.data_transform(buffer)
+
         buffer = [transforms.ToTensor()(img) for img in buffer]
         buffer = torch.stack(buffer) # T C H W
         buffer = buffer.permute(0, 2, 3, 1) # T H W C 
@@ -204,7 +238,7 @@ class VideoClsDataset(Dataset):
         buffer = buffer.permute(3, 0, 1, 2)
         # Perform data augmentation.
         scl, asp = (
-            [0.08, 1.0],
+            [0.8, 1.2],
             [0.75, 1.3333],
         )
 
@@ -263,8 +297,11 @@ class VideoClsDataset(Dataset):
                                     num_threads=1, ctx=cpu(0))
 
             # handle temporal segments
-            converted_len = int(self.clip_len * self.frame_sample_rate)
+            converted_len = int(self.clip_len * self.frame_sample_rate) - (self.frame_sample_rate - 1)
             seg_len = len(vr) // self.num_segment
+            # assert seg_len == converted_len, "Make sure that data loading works as expected!"
+            # print('converted_len', converted_len)
+            # print('seg_len', seg_len)
 
             if self.mode == 'test':
                 temporal_step = max(1.0 * (len(vr) - converted_len) / (self.test_num_segment - 1), 0)
@@ -281,8 +318,10 @@ class VideoClsDataset(Dataset):
             all_index = []
             for i in range(self.num_segment):
                 if seg_len <= converted_len:
-                    index = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
-                    index = np.concatenate((index, np.ones(self.clip_len - seg_len // self.frame_sample_rate) * seg_len))
+                    # print('here')
+                    elements_fit = seg_len // self.frame_sample_rate + (1 if seg_len % self.frame_sample_rate > 0 else 0)
+                    index = np.linspace(0, seg_len, num=elements_fit )
+                    index = np.concatenate((index, np.ones(self.clip_len - elements_fit) * seg_len))
                     index = np.clip(index, 0, seg_len - 1).astype(np.int64)
                 else:
                     if self.mode == 'validation':
@@ -295,9 +334,11 @@ class VideoClsDataset(Dataset):
                 index = index + i*seg_len
                 all_index.extend(list(index))
 
+            # print('all index:', all_index)
             all_index = all_index[::int(sample_rate_scale)]
             vr.seek(0)
             buffer = vr.get_batch(all_index).asnumpy()
+            # print("Getting these indexes:", all_index)
             return buffer
         except:
             print("video cannot be loaded by decord: ", fname)

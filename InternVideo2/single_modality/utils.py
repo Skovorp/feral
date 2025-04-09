@@ -12,7 +12,7 @@ from pathlib import Path
 import subprocess
 import torch
 import torch.distributed as dist
-from torch._six import inf
+from torch import inf
 import random
 
 from tensorboardX import SummaryWriter
@@ -25,6 +25,20 @@ try:
 except ImportError:
     has_client = False
     client = None
+
+
+def synchronize_lists(local_list):
+    if not dist.is_initialized():
+        raise Exception
+
+    gathered_lists = [None] * dist.get_world_size()
+    dist.all_gather_object(gathered_lists, local_list)
+
+    global_list = []
+    for d in gathered_lists:
+        global_list.extend(d)
+
+    return global_list
 
 
 class SmoothedValue(object):
@@ -70,7 +84,7 @@ class SmoothedValue(object):
 
     @property
     def global_avg(self):
-        return self.total / self.count
+        return 0 if self.count == 0 else self.total / self.count
 
     @property
     def max(self):
@@ -361,6 +375,9 @@ def init_distributed_mode(args):
         return
 
     args.distributed = True
+    print("RUNNING DISTRIBUTED")
+    print(args.world_size)
+    print(args.rank)
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = 'nccl'

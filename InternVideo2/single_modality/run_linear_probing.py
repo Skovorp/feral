@@ -23,6 +23,9 @@ from utils import multiple_samples_collate
 import utils
 from models import *
 
+import warnings
+warnings.filterwarnings("ignore", message=".*torch.cuda.*")
+import wandb
 
 def get_args():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
@@ -122,6 +125,7 @@ def get_args():
                         help='Label smoothing (default: 0.1)')
     parser.add_argument('--train_interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
+    parser.add_argument('--my_aug_type', type=str, choices=['no_aug', 'custom', 'aa', 'aa_spacial_sampling'])
 
     # Evaluation parameters
     parser.add_argument('--crop_pct', type=float, default=None)
@@ -236,7 +240,13 @@ def get_args():
     parser.add_argument('--zero_stage', default=0, type=int,
                         help='ZeRO optimizer stage (default: 0)')
 
+    # Peter added
+    parser.add_argument('--job_name', type=str)
+    parser.add_argument('--loss_pos_weight', type=float)
+    parser.add_argument('--do_lr_scale', type=bool)
+
     known_args, _ = parser.parse_known_args()
+    print(known_args.enable_deepspeed)
 
     if known_args.enable_deepspeed:
         try:
@@ -260,6 +270,12 @@ def main(args, ds_init):
         utils.create_internvideo2_ds_config(args)
 
     print(args)
+    if utils.is_main_process():
+        wandb.init(
+            project="Veles",
+            name=args.job_name,
+            config=vars(args)
+        )
 
     device = torch.device(args.device)
 
@@ -278,6 +294,13 @@ def main(args, ds_init):
         dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
     dataset_test, _ = build_dataset(is_train=False, test_mode=True, args=args)
     
+    print('Dataset Train')
+    print(dataset_train[0][0].shape)
+    
+    print('Dataset Val')
+    print(dataset_val[0][0].shape)
+    # 1/0
+
 
     num_tasks = utils.get_world_size()
     global_rank = utils.get_rank()
@@ -342,6 +365,16 @@ def main(args, ds_init):
     else:
         data_loader_test = None
 
+    print("dataloader train")
+    print(next(iter(data_loader_train))[0].shape)
+
+    print("dataloader val")
+    print(next(iter(data_loader_val))[0].shape)
+
+    # print(dataset_val[0])
+    # print(next(iter(data_loader_val)))
+    # 1/0
+
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -349,9 +382,10 @@ def main(args, ds_init):
         mixup_fn = Mixup(
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.nb_classes)
+            label_smoothingseed=args.smoothing, num_classes=args.nb_classes)
 
     if 'cat' in args.model:
+        1/0
         model = create_model(
             args.model,
             pretrained=False,
@@ -371,6 +405,8 @@ def main(args, ds_init):
             merge_norm=args.merge_norm,
         )
     else:
+        print("Creating this model")
+        print(args.model)
         model = create_model(
             args.model,
             pretrained=False,
@@ -401,6 +437,8 @@ def main(args, ds_init):
             checkpoint = torch.load(args.finetune, map_location='cpu')
 
         print("Load ckpt from %s" % args.finetune)
+        # print(checkpoint)
+
         checkpoint_model = None
         for model_key in args.model_key.split('|'):
             if model_key in checkpoint:
@@ -431,13 +469,17 @@ def main(args, ds_init):
         all_keys = list(checkpoint_model.keys())
         new_dict = OrderedDict()
         for key in all_keys:
-            if key.startswith('backbone.'):
-                new_dict[key[9:]] = checkpoint_model[key]
-            elif key.startswith('encoder.'):
-                new_dict[key[8:]] = checkpoint_model[key]
+            new_key = key
+            if new_key.startswith('vision_encoder.'):
+                new_key = new_key[15:]
+            if new_key.startswith('backbone.'):
+                new_dict[new_key[9:]] = checkpoint_model[key]
+            elif new_key.startswith('encoder.'):
+                new_dict[new_key[8:]] = checkpoint_model[key]
             else:
-                new_dict[key] = checkpoint_model[key]
+                new_dict[new_key] = checkpoint_model[key]
         checkpoint_model = new_dict
+        print(checkpoint_model.keys())
         
         if args.finetune_extra:
             extra_checkpoint = torch.load(args.finetune_extra, map_location='cpu')
@@ -552,7 +594,9 @@ def main(args, ds_init):
     else:
         depth = 40 # ViT-g
     block_num_list = [(depth - i - 1) for i in range(args.open_block_num)]
+    # print([x[0] for x in model.named_parameters()])
     for name, p in model.named_parameters():
+        # p.requires_grad = True
         if name.startswith('patch_embed') or name.startswith('pos_embed') or name.startswith('cls_token'):
             print(f"Freeze {name}")
             p.requires_grad = False
@@ -572,7 +616,6 @@ def main(args, ds_init):
             p.requires_grad = False
         else:
             print(f"Unfreeze {name}")
-
     model_ema = None
     if args.model_ema:
         model_ema = ModelEma(
@@ -626,6 +669,7 @@ def main(args, ds_init):
         assert model.gradient_accumulation_steps() == args.update_freq
     else:
         if args.distributed:
+            print("in DistributedDataParallel")
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model_without_ddp = model.module
 
@@ -646,13 +690,13 @@ def main(args, ds_init):
         args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
-    if mixup_fn is not None:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    # if mixup_fn is not None:
+    #     # smoothing is handled with mixup label transform
+    #     criterion = SoftTargetCrossEntropy()
+    # elif args.smoothing > 0.:
+    #     criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+    # else:
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=args.smoothing, weight=torch.tensor((1.0, 10.0)))
 
     print("criterion = %s" % str(criterion))
     ceph_args = {
@@ -689,52 +733,57 @@ def main(args, ds_init):
         exit(0)
         
 
+    # print("Running eval epoch on untrained model")
+    # validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16)
+    # 1/0
+
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_accuracy = 0.0
+    max_auc = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
+        # print('skipping train')
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer,
             device, epoch, loss_scaler, args.clip_grad, model_ema, mixup_fn,
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
-            bf16=args.bf16
+            bf16=args.bf16, loss_pos_weight=args.loss_pos_weight, do_lr_scale=args.do_lr_scale
         )
-        if args.output_dir and args.save_ckpt:
-            # if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
-            #     utils.save_model(
-            #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-            #         loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema,
-            #         ceph_args=ceph_args,
-            #      )
-            utils.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch, model_name='latest', model_ema=model_ema,
-                ceph_args=ceph_args,
-            )
+        # if args.output_dir and args.save_ckpt:
+        #     # if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
+        #     #     utils.save_model(
+        #     #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+        #     #         loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema,
+        #     #         ceph_args=ceph_args,
+        #     #      )
+        #     utils.save_model(
+        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+        #         loss_scaler=loss_scaler, epoch=epoch, model_name='latest', model_ema=model_ema,
+        #         ceph_args=ceph_args,
+        #     )
         if data_loader_val is not None:
-            test_stats = validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16)
+            test_stats = validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16, loss_pos_weight=args.loss_pos_weight, run_name=args.job_name)
             timestep = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             print(f"[{timestep}] Accuracy of the network on the {len(dataset_val)} val videos: {test_stats['acc1']:.1f}%")
-            if max_accuracy < test_stats["acc1"]:
-                max_accuracy = test_stats["acc1"]
-                if args.output_dir and args.save_ckpt:
-                    utils.save_model(
-                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch=epoch, model_name='best', model_ema=model_ema,
-                        ceph_args=ceph_args,
-                    )
+            # if max_auc < test_stats["PR_AUC"]:
+            #     max_auc = test_stats["PR_AUC"]
+            #     if args.output_dir and args.save_ckpt:
+            #         utils.save_model(
+            #             args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+            #             loss_scaler=loss_scaler, epoch=epoch, model_name='best', model_ema=model_ema,
+            #             ceph_args=ceph_args,
+            #         )
 
-            print(f'Max accuracy: {max_accuracy:.2f}%')
+            print(f'Max AUC PR: {max_auc:.2f}%')
             if log_writer is not None:
                 log_writer.update(val_acc1=test_stats['acc1'], head="perf", step=epoch)
-                log_writer.update(val_acc5=test_stats['acc5'], head="perf", step=epoch)
-                log_writer.update(val_loss=test_stats['loss'], head="perf", step=epoch)
+                # log_writer.update(val_acc5=test_stats['acc5'], head="perf", step=epoch)
+                # log_writer.update(val_loss=test_stats['loss'], head="perf", step=epoch)
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                          **{f'val_{k}': v for k, v in test_stats.items()},
@@ -749,32 +798,39 @@ def main(args, ds_init):
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
+            wandb.log(log_stats)
+        print("saving final model")
+        utils.save_model(
+                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=epoch, model_name='latest', model_ema=model_ema,
+                ceph_args=ceph_args,
+            )
 
-    preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
-    if args.test_best:
-        print("Auto testing the best model")
-        args.eval = True
-        utils.auto_load_model(
-            args=args, model=model, model_without_ddp=model_without_ddp,
-            optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema,
-            ceph_args=ceph_args,
-        )
-    test_stats = final_test(data_loader_test, model, device, preds_file, ds=args.enable_deepspeed, bf16=args.bf16)
-    torch.distributed.barrier()
-    if global_rank == 0:
-        print("Start merging results...")
-        final_top1 ,final_top5 = merge(args.output_dir, num_tasks)
-        print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
-        log_stats = {'Final top-1': final_top1,
-                    'Final Top-5': final_top5}
-        if args.output_dir and utils.is_main_process():
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
+    # preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
+    # if args.test_best:
+    #     print("Auto testing the best model")
+    #     args.eval = True
+    #     utils.auto_load_model(
+    #         args=args, model=model, model_without_ddp=model_without_ddp,
+    #         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema,
+    #         ceph_args=ceph_args,
+    #     )
+    # test_stats = final_test(data_loader_test, model, device, preds_file, ds=args.enable_deepspeed, bf16=args.bf16)
+    # torch.distributed.barrier()
+    # if global_rank == 0:
+    #     print("Start merging results...")
+    #     final_top1 ,final_top5 = merge(args.output_dir, num_tasks)
+    #     print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
+    #     log_stats = {'Final top-1': final_top1,
+    #                 'Final Top-5': final_top5}
+    #     if args.output_dir and utils.is_main_process():
+    #         with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+    #             f.write(json.dumps(log_stats) + "\n")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
+    1/0 # just to be sure that i exit
 
 if __name__ == '__main__':
     opts, ds_init = get_args()

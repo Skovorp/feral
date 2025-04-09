@@ -426,7 +426,7 @@ class InternVideo2(nn.Module):
             norm_layer=partial(nn.LayerNorm, eps=1e-5), out_dim=clip_embed_dim
         )
         
-        self.fc_norm = nn.LayerNorm(clip_embed_dim)
+        self.fc_norm = nn.BatchNorm1d(clip_embed_dim) # nn.LayerNorm(clip_embed_dim)
         self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
         self.head = nn.Linear(clip_embed_dim, num_classes)
 
@@ -538,8 +538,10 @@ class InternVideo2(nn.Module):
         
         x = self.clip_projector(x)
 
+        # print(x.shape)
         x = self.fc_norm(x)
         x = self.head(self.fc_dropout(x))
+        
         return x
 
 
@@ -578,6 +580,7 @@ def internvideo2_large_patch14_224(pretrained=False, **kwargs):
 
 @register_model
 def internvideo2_1B_patch14_224(pretrained=False, **kwargs):
+    # print("ZALUPA")
     model = InternVideo2(
         img_size=224, patch_size=14, embed_dim=1408, 
         depth=40, num_heads=16, mlp_ratio=48/11, 

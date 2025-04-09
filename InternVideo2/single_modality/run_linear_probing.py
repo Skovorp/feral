@@ -27,6 +27,8 @@ import warnings
 warnings.filterwarnings("ignore", message=".*torch.cuda.*")
 import wandb
 
+from datasets.rand_augment import _RAND_CHOICE_WEIGHTS_0
+
 def get_args():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -370,6 +372,9 @@ def main(args, ds_init):
 
     print("dataloader val")
     print(next(iter(data_loader_val))[0].shape)
+
+    print("Autoaugment params")
+    print(_RAND_CHOICE_WEIGHTS_0)
 
     # print(dataset_val[0])
     # print(next(iter(data_loader_val)))

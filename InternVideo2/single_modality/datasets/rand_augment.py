@@ -422,35 +422,17 @@ _RAND_INCREASING_TRANSFORMS = [
 
 # These experimental weights are based loosely on the relative improvements mentioned in paper.
 # They may not result in increased performance, but could likely be tuned to so.
-# _RAND_CHOICE_WEIGHTS_0 = { # before -- no_spacial_sampling
-#     "Rotate": 0.3,
-#     "ShearX": 0.2,
-#     "ShearY": 0.2,
-#     "TranslateXRel": 0.1,
-#     "TranslateYRel": 0.1,
-#     "Color": 0.025,
-#     "Sharpness": 0.025,
-#     "AutoContrast": 0.025,
-#     "Solarize": 0.005,
-#     "SolarizeAdd": 0.005,
-#     "Contrast": 0.005,
-#     "Brightness": 0.005,
-#     "Equalize": 0.005,
-#     "Posterize": 0,
-#     "Invert": 0,
-# }
-
-_RAND_CHOICE_WEIGHTS_0 = {  # augmentations_more_severe
+_RAND_CHOICE_WEIGHTS_0 = { # change back, FIX_DATALOADING_replicate_aa_old_weights
     "Rotate": 0.3,
     "ShearX": 0.2,
     "ShearY": 0.2,
     "TranslateXRel": 0.1,
     "TranslateYRel": 0.1,
-    "Color": 0.0,
+    "Color": 0.025,
     "Sharpness": 0.025,
     "AutoContrast": 0.025,
-    "Solarize": 0.000,
-    "SolarizeAdd": 0.000,
+    "Solarize": 0.005,
+    "SolarizeAdd": 0.005,
     "Contrast": 0.005,
     "Brightness": 0.005,
     "Equalize": 0.005,

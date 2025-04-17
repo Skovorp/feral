@@ -423,16 +423,16 @@ _RAND_INCREASING_TRANSFORMS = [
 # These experimental weights are based loosely on the relative improvements mentioned in paper.
 # They may not result in increased performance, but could likely be tuned to so.
 _RAND_CHOICE_WEIGHTS_0 = { # change back, FIX_DATALOADING_replicate_aa_old_weights
-    "Rotate": 0.3,
-    "ShearX": 0.2,
-    "ShearY": 0.2,
+    "Rotate": 0.25,
+    "ShearX": 0.19,
+    "ShearY": 0.19,
     "TranslateXRel": 0.1,
     "TranslateYRel": 0.1,
-    "Color": 0.025,
+    "Color": 0.075,
     "Sharpness": 0.025,
     "AutoContrast": 0.025,
-    "Solarize": 0.005,
-    "SolarizeAdd": 0.005,
+    "Solarize": 0.015,
+    "SolarizeAdd": 0.015,
     "Contrast": 0.005,
     "Brightness": 0.005,
     "Equalize": 0.005,

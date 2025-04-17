@@ -228,6 +228,8 @@ def get_args():
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.set_defaults(pin_mem=True)
+    parser.add_argument('--peter_eval', action='store_true')
+
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -722,25 +724,25 @@ def main(args, ds_init):
     
     print(f"Use bf16 {args.bf16}")
 
-    if args.eval:
-        preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
-        test_stats = final_test(data_loader_test, model, device, preds_file, ds=args.enable_deepspeed, bf16=args.bf16)
-        torch.distributed.barrier()
-        if global_rank == 0:
-            print("Start merging results...")
-            final_top1 ,final_top5 = merge(args.output_dir, num_tasks)
-            print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
-            log_stats = {'Final top-1': final_top1,
-                        'Final Top-5': final_top5}
-            if args.output_dir and utils.is_main_process():
-                with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                    f.write(json.dumps(log_stats) + "\n")
+    if args.peter_eval:
+        # preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
+        # test_stats = final_test(data_loader_test, model, device, preds_file, ds=args.enable_deepspeed, bf16=args.bf16)
+        # torch.distributed.barrier()
+        # if global_rank == 0:
+        #     print("Start merging results...")
+        #     final_top1 ,final_top5 = merge(args.output_dir, num_tasks)
+        #     print(f"Accuracy of the network on the {len(dataset_test)} test videos: Top-1: {final_top1:.2f}%, Top-5: {final_top5:.2f}%")
+        #     log_stats = {'Final top-1': final_top1,
+        #                 'Final Top-5': final_top5}
+        #     if args.output_dir and utils.is_main_process():
+        #         with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+        #             f.write(json.dumps(log_stats) + "\n")
+        print("Running eval only")
+        test_stats = validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16, run_name=args.job_name)
+        print(test_stats)
         exit(0)
         
 
-    # print("Running eval epoch on untrained model")
-    # validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16)
-    # 1/0
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -835,7 +837,6 @@ def main(args, ds_init):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    1/0 # just to be sure that i exit
 
 if __name__ == '__main__':
     opts, ds_init = get_args()

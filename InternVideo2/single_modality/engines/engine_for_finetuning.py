@@ -14,7 +14,7 @@ import random
 from utils import synchronize_lists
 from datetime import datetime
 import json
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
 
 def train_class_batch(model, samples, target, criterion):
     outputs = model(samples)
@@ -45,6 +45,36 @@ class FocalLoss(torch.nn.Module):
         focal_loss = 2 * (1 - pt) ** self.gamma * BCE_loss # alphas
 
         return focal_loss.mean()
+
+def calculate_metrics_for_different_conditions(ans):
+    fn_filters = {
+        'deet': lambda x: 'deet' in x.lower(),
+        'picaridin': lambda x: 'picaridin' in x.lower(),
+        'ethanol': lambda x: 'ethanol' in x.lower(),
+    }
+
+    res = {}
+    for partition, func in fn_filters.items():
+        pred = [x[1] for x in ans if func(x[0])]
+        tgt  = [x[2] for x in ans if func(x[0])]
+        try:
+            pr_auc = average_precision_score(tgt, pred)
+        except Exception:
+            pr_auc = None
+        
+        try:
+            precision, recall, thresholds = precision_recall_curve(tgt, pred)
+        
+            recall_mask = recall[:-1] < 0.7
+            idx = np.argmax(recall_mask)
+            prec_at_thresh = precision[idx]
+            cutoff = thresholds[idx]
+        except Exception:
+            prec_at_thresh = None 
+        
+        res[f"{partition}_pr_auc"] = pr_auc
+        res[f"{partition}_precision@0.7"] = prec_at_thresh
+    return res
 
 
 def train_one_epoch(
@@ -277,6 +307,7 @@ def validation_one_epoch(data_loader, model, device, ds=False, bf16=False, loss_
     logs_outp = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     logs_outp['ROC_AUC'] = roc_auc_score(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
     logs_outp['PR_AUC'] = average_precision_score(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
+    logs_outp.update(calculate_metrics_for_different_conditions(answers))
     return logs_outp
 
 

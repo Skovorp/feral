@@ -29,6 +29,7 @@ import wandb
 
 from datasets.rand_augment import _RAND_CHOICE_WEIGHTS_0
 
+
 def get_args():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -252,12 +253,12 @@ def get_args():
     parser.add_argument('--cls_type', type=str)
     parser.add_argument('--class_names', type=str)
     parser.add_argument('--predictions_per_frame', type=int)
-    parser.add_argument('--is_packed_target', type=bool)
 
     known_args, _ = parser.parse_known_args()
     print(known_args.enable_deepspeed)
 
     if known_args.enable_deepspeed:
+        assert False
         try:
             import deepspeed
             from deepspeed import DeepSpeedConfig
@@ -271,74 +272,28 @@ def get_args():
 
     return parser.parse_args(), ds_init
 
-
 def main(args, ds_init):
-    utils.init_distributed_mode(args)
 
-    if ds_init is not None:
-        utils.create_internvideo2_ds_config(args)
+    wandb.init(
+        project="Veles",
+        name=args.job_name,
+        config=vars(args)
+    )
 
-    print(args)
-    if utils.is_main_process():
-        wandb.init(
-            project="Veles",
-            name=args.job_name,
-            config=vars(args)
-        )
+    device = torch.device('cuda')
+    
+    os.makedirs(args.log_dir, exist_ok=True)
+    log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
 
-    device = torch.device(args.device)
-
-    # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    # random.seed(seed)
 
     cudnn.benchmark = True
 
     dataset_train, args.nb_classes = build_dataset(is_train=True, test_mode=False, args=args)
-    if args.disable_eval_during_finetuning:
-        dataset_val = None
-    else:
-        dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
-    dataset_test, _ = build_dataset(is_train=False, test_mode=True, args=args)
-    
-    print('Dataset Train')
-    print(dataset_train[0][0].shape)
-    
-    print('Dataset Val')
-    print(dataset_val[0][0].shape)
-    # 1/0
+    dataset_val, _ = build_dataset(is_train=False, test_mode=False, args=args)
 
-
-    num_tasks = utils.get_world_size()
-    global_rank = utils.get_rank()
-    sampler_train = torch.utils.data.DistributedSampler(
-        dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=False
-    )
-    print("Sampler_train = %s" % str(sampler_train))
-    if args.dist_eval:
-        if len(dataset_val) % num_tasks != 0:
-            print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                    'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                    'equal num of samples per-process.')
-        sampler_val = torch.utils.data.DistributedSampler(
-            dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-        sampler_test = torch.utils.data.DistributedSampler(
-            dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-    else:
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
-    if global_rank == 0 and args.log_dir is not None:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
-    else:
-        log_writer = None
-
-    if args.num_sample > 1:
-        collate_func = partial(multiple_samples_collate, fold=False)
-    else:
-        collate_func = None
+    sampler_train = torch.utils.data.SequentialSampler(dataset_train)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -346,7 +301,7 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=collate_func,
+        collate_fn=None,
         persistent_workers=True
     )
 
@@ -359,33 +314,14 @@ def main(args, ds_init):
             drop_last=False,
             persistent_workers=True
         )
-    else:
-        data_loader_val = None
-
-    if dataset_test is not None:
-        data_loader_test = torch.utils.data.DataLoader(
-            dataset_test, sampler=sampler_test,
-            batch_size=args.test_batch_size,
-            num_workers=args.num_workers,
-            pin_memory=args.pin_mem,
-            drop_last=False,
-            persistent_workers=True
-        )
-    else:
-        data_loader_test = None
-
-    print("dataloader train")
-    print(next(iter(data_loader_train))[0].shape)
-
-    print("dataloader val")
-    print(next(iter(data_loader_val))[0].shape)
-
-    print("Autoaugment params")
-    print(_RAND_CHOICE_WEIGHTS_0)
-
-    # print(dataset_val[0])
-    # print(next(iter(data_loader_val)))
+    
+    print('Dataset Train')
+    print(dataset_train[0][0].shape)
+    
+    print('Dataset Val')
+    print(dataset_val[0][0].shape)
     # 1/0
+
 
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
@@ -394,11 +330,9 @@ def main(args, ds_init):
         mixup_fn = Mixup(
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.nb_classes, is_packed_target=args.is_packed_target)
-
-    if 'cat' in args.model:
-        1/0
-        model = create_model(
+            label_smoothing=args.smoothing, num_classes=args.nb_classes)
+        
+    model = create_model(
             args.model,
             pretrained=False,
             num_classes=args.nb_classes,
@@ -413,34 +347,13 @@ def main(args, ds_init):
             init_scale=args.init_scale,
             init_values=args.layer_scale_init_value,
             layerscale_no_force_fp32=args.layerscale_no_force_fp32,
-            merge_method=args.merge_method,
-            merge_norm=args.merge_norm,
-        )
-    else:
-        print("Creating this model")
-        print(args.model)
-        model = create_model(
-            args.model,
-            pretrained=False,
-            num_classes=args.nb_classes,
-            num_frames=args.num_frames * args.num_segments,
-            tubelet_size=args.tubelet_size,
-            sep_pos_embed=args.sep_pos_embed,
-            fc_drop_rate=args.fc_drop_rate,
-            drop_path_rate=args.drop_path,
-            head_drop_path_rate=args.head_drop_path,
-            use_checkpoint=args.use_checkpoint,
-            checkpoint_num=args.checkpoint_num,
-            init_scale=args.init_scale,
-            init_values=args.layer_scale_init_value,
-            layerscale_no_force_fp32=args.layerscale_no_force_fp32,
-            out_tokens = args.predictions_per_frame
         )
 
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
     args.window_size = (args.num_frames // args.tubelet_size, args.input_size // patch_size[0], args.input_size // patch_size[1])
     args.patch_size = patch_size
+
 
     if args.finetune:
         if args.finetune.startswith('https'):
@@ -638,13 +551,10 @@ def main(args, ds_init):
             resume='')
         print("Using EMA with decay = %.8f" % args.model_ema_decay)
 
-    model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    print("Model = %s" % str(model_without_ddp))
     print('number of params:', n_parameters)
 
-    total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
+    total_batch_size = args.batch_size * args.update_freq
     num_training_steps_per_epoch = len(dataset_train) // total_batch_size
     args.lr = args.lr * total_batch_size * args.num_sample / 256
     args.min_lr = args.min_lr * total_batch_size * args.num_sample / 256
@@ -656,7 +566,7 @@ def main(args, ds_init):
     print("Number of training examples = %d" % len(dataset_train))
     print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
 
-    num_layers = model_without_ddp.get_num_layers()
+    num_layers = model.get_num_layers()
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
     else:
@@ -668,29 +578,11 @@ def main(args, ds_init):
     skip_weight_decay_list = model.no_weight_decay()
     print("Skip weight decay list: ", skip_weight_decay_list)
 
-    if args.enable_deepspeed:
-        loss_scaler = None
-        optimizer_params = get_parameter_groups(
-            model, args.weight_decay, skip_weight_decay_list,
-            assigner.get_layer_id if assigner is not None else None,
-            assigner.get_scale if assigner is not None else None)
-        model, optimizer, _, _ = ds_init(
-            args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
-        )
-
-        print("model.gradient_accumulation_steps() = %d" % model.gradient_accumulation_steps())
-        assert model.gradient_accumulation_steps() == args.update_freq
-    else:
-        if args.distributed:
-            print("in DistributedDataParallel")
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
-            model_without_ddp = model.module
-
-        optimizer = create_optimizer(
-            args, model_without_ddp, skip_list=skip_weight_decay_list,
-            get_num_layer=assigner.get_layer_id if assigner is not None else None, 
-            get_layer_scale=assigner.get_scale if assigner is not None else None)
-        loss_scaler = NativeScaler()
+    optimizer = create_optimizer(
+        args, model, skip_list=skip_weight_decay_list,
+        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
+        get_layer_scale=assigner.get_scale if assigner is not None else None)
+    loss_scaler = NativeScaler()
 
     print("Use step level LR scheduler!")
     lr_schedule_values = utils.cosine_scheduler(
@@ -716,21 +608,21 @@ def main(args, ds_init):
         'use_ceph_checkpoint': args.use_ceph_checkpoint,
         'ceph_checkpoint_prefix': args.ceph_checkpoint_prefix,
         'ckpt_path_split': args.ckpt_path_split,
-        'local_rank': args.gpu,
+        'local_rank': 0,
     }
     if ceph_args['use_ceph_checkpoint']:
         print("Will automatically upload model on ceph")
         assert ceph_args['ceph_checkpoint_prefix'] != '', "Should set prefix for ceph checkpoint!"
 
     utils.auto_load_model(
-        args=args, model=model, model_without_ddp=model_without_ddp,
+        args=args, model=model, model_without_ddp=model,
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema,
         ceph_args=ceph_args,
     )
     
     print(f"Use bf16 {args.bf16}")
 
-    if args.peter_eval:
+    # if args.peter_eval:
         # preds_file = os.path.join(args.output_dir, str(global_rank) + '.txt')
         # test_stats = final_test(data_loader_test, model, device, preds_file, ds=args.enable_deepspeed, bf16=args.bf16)
         # torch.distributed.barrier()
@@ -743,21 +635,21 @@ def main(args, ds_init):
         #     if args.output_dir and utils.is_main_process():
         #         with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
         #             f.write(json.dumps(log_stats) + "\n")
-        print("Running eval only")
-        test_stats = validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16, run_name=args.job_name, eval_filters=args.eval_filters, cls_type=args.cls_type, class_names=args.class_names, predictions_per_frame=args.predictions_per_frame)
-        print(test_stats)
-        if utils.is_main_process():
+        # print("Running eval only")
+        # test_stats = validation_one_epoch(data_loader_val, model, device, ds=args.enable_deepspeed, bf16=args.bf16, run_name=args.job_name, eval_filters=args.eval_filters, cls_type=args.cls_type, class_names=args.class_names, predictions_per_frame=args.predictions_per_frame)
+        # print(test_stats)
+        # if utils.is_main_process():
 
-            log_stats = {**{f'val_{k}': v for k, v in test_stats.items()},
-                         'epoch': 0,
-                         'n_parameters': n_parameters}
+        #     log_stats = {**{f'val_{k}': v for k, v in test_stats.items()},
+        #                  'epoch': 0,
+        #                  'n_parameters': n_parameters}
 
-            if log_writer is not None:
-                log_writer.flush()
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
-            wandb.log(log_stats)
-        exit(0)
+        #     if log_writer is not None:
+        #         log_writer.flush()
+        #     with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+        #         f.write(json.dumps(log_stats) + "\n")
+        #     wandb.log(log_stats)
+        # exit(0)
         
 
 
@@ -765,8 +657,6 @@ def main(args, ds_init):
     start_time = time.time()
     max_auc = 0.0
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
         # print('skipping train')
@@ -857,6 +747,7 @@ def main(args, ds_init):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
 
 if __name__ == '__main__':
     opts, ds_init = get_args()

@@ -88,7 +88,10 @@ class SmoothedValue(object):
 
     @property
     def max(self):
-        return max(self.deque)
+        if len(self.deque) > 0:
+            return max(self.deque)
+        else:
+            return None
 
     @property
     def value(self):

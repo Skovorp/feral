@@ -15,12 +15,21 @@ from utils import synchronize_lists
 from datetime import datetime
 import json
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+import time
 
-def train_class_batch(model, samples, target, criterion):
+def train_class_batch(model, samples, target, criterion, is_binary):
     outputs = model(samples)
-    loss = criterion(outputs[:, 0], target.float())
+    if is_binary:
+        loss = criterion(outputs[:, 0], target.float())
+    else:
+        loss = criterion(outputs, target)
     return loss, outputs
 
+def roc_auc_score_safe(first, second):
+    try:
+        return roc_auc_score(first, second)
+    except Exception:
+        return None
 
 def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
@@ -46,12 +55,8 @@ class FocalLoss(torch.nn.Module):
 
         return focal_loss.mean()
 
-def calculate_metrics_for_different_conditions(ans):
-    fn_filters = {
-        'deet': lambda x: 'deet' in x.lower(),
-        'picaridin': lambda x: 'picaridin' in x.lower(),
-        'ethanol': lambda x: 'ethanol' in x.lower(),
-    }
+def calculate_metrics_for_different_conditions(ans, fn_filters_arg):
+    fn_filters = eval(fn_filters_arg)
 
     res = {}
     for partition, func in fn_filters.items():
@@ -76,6 +81,21 @@ def calculate_metrics_for_different_conditions(ans):
         res[f"{partition}_precision@0.7"] = prec_at_thresh
     return res
 
+def calculate_multiclass_metrics(ans, class_names):
+    class_names = eval(class_names) # {0: 'attack', 1: 'invest', 2: 'mount', 3: 'other'}
+    preds = np.array([x[-2] for x in ans])
+    targets = np.array([x[-1] for x in ans])
+
+    aps = []
+    res = {}
+    for cls_ind, cls_name in class_names.items():
+        ap = average_precision_score(targets == cls_ind, preds[:, cls_ind])
+        if cls_name != 'other':
+            aps.append(ap)
+        res[f'ap_{cls_name}'] = ap 
+    res['map'] = sum(aps) / len(aps)
+    return res
+
 
 def train_one_epoch(
         model: torch.nn.Module, criterion: torch.nn.Module,
@@ -84,7 +104,7 @@ def train_one_epoch(
         model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
         start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
         num_training_steps_per_epoch=None, update_freq=None,
-        bf16=False, loss_pos_weight=None, do_lr_scale=True
+        bf16=False, loss_pos_weight=None, do_lr_scale=True, cls_type=None, class_names=None, predictions_per_frame=None
     ):
     model.train(True)
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -103,17 +123,21 @@ def train_one_epoch(
     #     label_smoothing=0.1,
     #     weight=torch.tensor([1.0, 3.0]).to(model.device)
     # )
-    if loss_pos_weight is None:
-        criterion = torch.nn.BCEWithLogitsLoss()
+    if cls_type == 'multiclass':
+        criterion = torch.nn.CrossEntropyLoss(
+            # weight=torch.tensor([4.8, 1.5, 3.3, 1.0]).to(model.device)
+        )
+    elif cls_type == "binary":
+        if loss_pos_weight is None:
+            criterion = torch.nn.BCEWithLogitsLoss()
+        else:
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_pos_weight))
+        # criterion = FocalLoss(gamma=2, alpha=None)
     else:
-        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_pos_weight))
-    # criterion = FocalLoss(gamma=2, alpha=None)
+        raise Exception("Bad value for cls_type")
     answers = []
 
-
     for data_iter_step, (samples, targets, _, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
-        # print(a, b)
-        # print(data_loader.dataset[a[0]])
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -134,17 +158,32 @@ def train_one_epoch(
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
+        # print("Targets before mixup: ", targets, targets.shape)
+        targets_for_loss = targets
+
         if mixup_fn is not None:
-            samples, targets = mixup_fn(samples, targets)
+            samples, mixup_targets = mixup_fn(samples, targets)
+            if cls_type=='binary':
+                targets_for_loss = mixup_targets[:, 1]
+            else:
+                targets_for_loss = mixup_targets
+        
+        
+
+
+        if (predictions_per_frame > 1) and (mixup_fn is None):
+            targets_for_loss = targets_for_loss.unsqueeze(1) // 10 ** torch.arange(15, -1, -1, device=targets_for_loss.device)
+            targets_for_loss = targets_for_loss % 10
+            targets_for_loss = targets_for_loss.flatten()
 
         if loss_scaler is None:
             samples = samples.bfloat16() if bf16 else samples.half()
             loss, output = train_class_batch(
-                model, samples, targets, criterion)
+                model, samples, targets_for_loss, criterion, is_binary=(cls_type=='binary'))
         else:
             with torch.cuda.amp.autocast():
                 loss, output = train_class_batch(
-                    model, samples, targets, criterion)
+                    model, samples, targets_for_loss, criterion, is_binary=(cls_type=='binary'))
 
         loss_value = loss.item()
 
@@ -177,25 +216,28 @@ def train_one_epoch(
                     model_ema.update(model)
             loss_scale_value = loss_scaler.state_dict()["scale"]
 
-        torch.cuda.synchronize()
-        answers.extend(list(zip(output[:, 0].cpu().detach().tolist(), targets.cpu().detach().tolist())))
-
-        pred = (output[:, 0] > 0) * 1
-
-        if mixup_fn is None:
-            # class_acc = (output.max(-1)[-1] == targets).float().mean()
-            class_acc = (pred == targets).float().mean()
+        if cls_type=='binary':
+            answers.extend(list(zip(output[:, 0].cpu().detach().tolist(), targets.cpu().detach().tolist())))
+            pred = (output[:, 0] > 0) * 1
+            true_pos = ((pred == targets) & (targets == 1)).sum()
+            predicted_pos = (pred == 1).sum()
+            real_pos = (targets == 1).sum()
+            batch_precision = 0.0 if predicted_pos == 0 else (true_pos / predicted_pos).item()
+            batch_recall = 0.0 if real_pos == 0 else (true_pos / real_pos).item()
+            metric_logger.meters['precision'].update(batch_precision, n=predicted_pos.item())
+            metric_logger.meters['recall'].update(batch_recall, n=real_pos.item())
         else:
-            class_acc = None
+            answers.extend(list(zip(output.cpu().detach().tolist(), targets.cpu().detach().tolist())))
+
+        # if mixup_fn is None:
+        #     # class_acc = (output.max(-1)[-1] == targets).float().mean()
+        #     class_acc = (pred == targets).float().mean()
+        # else:
+        class_acc = None
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
         metric_logger.update(loss_scale=loss_scale_value)
 
-        true_pos = ((pred == targets) & (targets == 1)).sum()
-        predicted_pos = (pred == 1).sum()
-        real_pos = (targets == 1).sum()
-        batch_precision = 0.0 if predicted_pos == 0 else (true_pos / predicted_pos).item()
-        batch_recall = 0.0 if real_pos == 0 else (true_pos / real_pos).item()
 
         min_lr = 10.
         max_lr = 0.
@@ -211,8 +253,7 @@ def train_one_epoch(
                 weight_decay_value = group["weight_decay"]
         metric_logger.update(weight_decay=weight_decay_value)
         metric_logger.update(grad_norm=grad_norm)
-        metric_logger.meters['precision'].update(batch_precision, n=predicted_pos.item())
-        metric_logger.meters['recall'].update(batch_recall, n=real_pos.item())
+
 
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
@@ -224,23 +265,35 @@ def train_one_epoch(
             log_writer.update(grad_norm=grad_norm, head="opt")
 
             log_writer.set_step()
-
+        
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     logs_outp = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    logs_outp['ROC_AUC'] = roc_auc_score(np.array([x[1] for x in answers]), np.array([x[0] for x in answers]))
-    logs_outp['PR_AUC'] = average_precision_score(np.array([x[1] for x in answers]), np.array([x[0] for x in answers]))
+    if cls_type=='binary':
+        logs_outp['ROC_AUC'] = roc_auc_score_safe(np.array([x[1] for x in answers]), np.array([x[0] for x in answers]))
+        logs_outp['PR_AUC'] = average_precision_score(np.array([x[1] for x in answers]), np.array([x[0] for x in answers]))
+    else:
+        logs_outp.update(calculate_multiclass_metrics(answers, class_names))
     return logs_outp
 
 
 @torch.no_grad()
-def validation_one_epoch(data_loader, model, device, ds=False, bf16=False, loss_pos_weight=None, run_name=''):
-    if loss_pos_weight is None:
-        criterion = torch.nn.BCEWithLogitsLoss()
+def validation_one_epoch(data_loader, model, device, ds=False, bf16=False, loss_pos_weight=None, run_name='',  eval_filters=None, cls_type=None, class_names=None, predictions_per_frame=None):
+
+    if cls_type == 'multiclass':
+        criterion = torch.nn.CrossEntropyLoss(
+            # weight=torch.tensor([4.8, 1.5, 3.3, 1.0]).to(model.device)
+        )
+    elif cls_type == "binary":
+        assert class_names is not None
+        if loss_pos_weight is None:
+            criterion = torch.nn.BCEWithLogitsLoss()
+        else:
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_pos_weight))
+        # criterion = FocalLoss(gamma=2, alpha=None)
     else:
-        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_pos_weight))
-    # criterion = FocalLoss(gamma=2, alpha=None)
+        raise Exception("Bad value for cls_type")
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Val:'
@@ -254,45 +307,70 @@ def validation_one_epoch(data_loader, model, device, ds=False, bf16=False, loss_
         videos = batch[0]
         target = batch[1]
         video_names = batch[2]
+
+
         videos = videos.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
+
+        if predictions_per_frame > 1:
+            video_names = [f"{x}_{i}" for x in video_names for i in range(16)]
+            target = target.unsqueeze(1) // 10 ** torch.arange(15, -1, -1, device=target.device)
+            target = target % 10
+            target = target.flatten()
 
         # compute output
         if ds:
             videos = videos.bfloat16() if bf16 else videos.half()
             output = model(videos)
-            loss = criterion(output[:, 0], target.float())
+            if cls_type == 'binary':
+                loss = criterion(output[:, 0], target.float())
+                assert len(output.shape) == 2 and output.shape[1] == 1
+            else:
+                loss = criterion(output, target)
         else:
             with torch.cuda.amp.autocast():
-                output = model(videos)
-                loss = criterion(output[:, 0], target.float())
+                if cls_type == 'binary':
+                    output = model(videos)[:, :1]
+                    loss = criterion(output[:, 0], target.float())
+                    assert len(output.shape) == 2 and output.shape[1] == 1
+                else:
+                    output = model(videos)
+                    loss = criterion(output, target)
         
-        assert len(output.shape) == 2 and output.shape[1] == 1
+        
 
-        accuracy_outp = torch.cat([-output, output], 1)
+        if cls_type == 'binary':
+            accuracy_outp = torch.cat([-output, output], 1)
+        else:
+            accuracy_outp = output
         acc1, acc5 = accuracy(accuracy_outp, target, topk=(1, 5))
         # print(output.shape, target.shape)
-        print(output[:, 0], target)
+        # print(output[:, 0], target)
         # print()
         # print(f"Target elements: {target.shape[0]} Positives: {target.sum()}")
         # print(f"Output elements: {output.shape[0]} Positives: {output.sum()}")
 
-        answers.extend(list(zip(video_names, output[:, 0].cpu().detach().tolist(), target.cpu().detach().tolist())))
+        if cls_type == 'binary':
+            answers.extend(list(zip(video_names, output[:, 0].cpu().detach().tolist(), target.cpu().detach().tolist())))
 
-        pred = (output[:, 0] > 0) * 1
+            pred = (output[:, 0] > 0) * 1
 
-        true_pos = ((pred == target) & (target == 1)).sum()
-        predicted_pos = (pred == 1).sum()
-        real_pos = (target == 1).sum()
-        batch_precision = 0.0 if predicted_pos == 0 else (true_pos / predicted_pos).item()
-        batch_recall = 0.0 if real_pos == 0 else (true_pos / real_pos).item()
+            true_pos = ((pred == target) & (target == 1)).sum()
+            predicted_pos = (pred == 1).sum()
+            real_pos = (target == 1).sum()
+            batch_precision = 0.0 if predicted_pos == 0 else (true_pos / predicted_pos).item()
+            batch_recall = 0.0 if real_pos == 0 else (true_pos / real_pos).item()
+            metric_logger.meters['precision'].update(batch_precision, n=predicted_pos.item())
+            metric_logger.meters['recall'].update(batch_recall, n=real_pos.item())
+            print(f'accuracy: {metric_logger.acc1.global_avg:.3f}% | precision: {100 * metric_logger.precision.global_avg:.3f}% | recall: {100 * metric_logger.recall.global_avg:.3f}%')
+        else:
+            answers.extend(list(zip(video_names, output.cpu().detach().tolist(), target.cpu().detach().tolist())))
 
         batch_size = videos.shape[0]
         metric_logger.update(loss=loss.item())
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         # metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-        metric_logger.meters['precision'].update(batch_precision, n=predicted_pos.item())
-        metric_logger.meters['recall'].update(batch_recall, n=real_pos.item())
+       
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Answers before sync:", len(answers))
@@ -302,12 +380,17 @@ def validation_one_epoch(data_loader, model, device, ds=False, bf16=False, loss_
         json.dump(answers, f)
     # print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
     #       .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
-    print(f'accuracy: {metric_logger.acc1.global_avg:.3f}% | precision: {100 * metric_logger.precision.global_avg:.3f}% | recall: {100 * metric_logger.recall.global_avg:.3f}%')
+    
 
     logs_outp = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    logs_outp['ROC_AUC'] = roc_auc_score(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
-    logs_outp['PR_AUC'] = average_precision_score(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
-    logs_outp.update(calculate_metrics_for_different_conditions(answers))
+    
+    if cls_type == 'binary':
+        logs_outp['ROC_AUC'] = roc_auc_score_safe(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
+        logs_outp['PR_AUC'] = average_precision_score(np.array([x[2] for x in answers]), np.array([x[1] for x in answers]))
+        if eval_filters is not None:
+            logs_outp.update(calculate_metrics_for_different_conditions(answers, eval_filters))
+    else:
+        logs_outp.update(calculate_multiclass_metrics(answers, class_names))
     return logs_outp
 
 

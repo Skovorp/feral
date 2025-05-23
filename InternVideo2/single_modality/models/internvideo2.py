@@ -83,7 +83,7 @@ class CrossAttention(nn.Module):
 class AttentiveBlock(nn.Module):
     
     def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., norm_layer=nn.LayerNorm, attn_head_dim=None, out_dim=None):
+                 drop_path=0., norm_layer=nn.LayerNorm, attn_head_dim=None, out_dim=None, **kwargs):
         super().__init__()
         
         self.norm1_q = norm_layer(dim)
@@ -107,12 +107,24 @@ class AttentiveBlock(nn.Module):
 
 
 class AttentionPoolingBlock(AttentiveBlock):
-    
     def forward(self, x):
         x_q = x.mean(1, keepdim=True)
         x_kv, pos_q, pos_k = x, 0, 0
         x = super().forward(x_q, x_kv, pos_q, pos_k, bool_masked_pos=None, rel_pos_bias=None)
         x = x.squeeze(1)
+        return x
+    
+class AttentionPoolingBlockCustom(AttentiveBlock):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.x_q = nn.Parameter(torch.empty(kwargs['out_tokens'], kwargs['dim']))
+        nn.init.xavier_uniform_(self.x_q.data)
+
+    def forward(self, x):
+        x_q = self.x_q.unsqueeze(0).expand(x.size(0), -1, -1)
+        x_kv, pos_q, pos_k = x, 0, 0
+        x = super().forward(x_q, x_kv, pos_q, pos_k, bool_masked_pos=None, rel_pos_bias=None)
+        x = x.reshape(-1, x.shape[2])
         return x
 
 
@@ -364,6 +376,7 @@ class InternVideo2(nn.Module):
             fc_drop_rate: float = 0., 
             num_classes: int = 1000, 
             init_scale: float = 0.001,
+            out_tokens: int = 1
         ):
         super().__init__()
         
@@ -420,10 +433,10 @@ class InternVideo2(nn.Module):
                   layerscale_no_force_fp32=layerscale_no_force_fp32,
                   use_fused_rmsnorm=use_fused_rmsnorm)
             for i in range(depth)])
-        self.clip_projector = AttentionPoolingBlock(
+        self.clip_projector = AttentionPoolingBlockCustom(
             dim=embed_dim, num_heads=attn_pool_num_heads, qkv_bias=True, qk_scale=None,
             drop=0., attn_drop=0., drop_path=head_drop_path_rate, 
-            norm_layer=partial(nn.LayerNorm, eps=1e-5), out_dim=clip_embed_dim
+            norm_layer=partial(nn.LayerNorm, eps=1e-5), out_dim=clip_embed_dim, out_tokens=out_tokens
         )
         
         self.fc_norm = nn.BatchNorm1d(clip_embed_dim) # nn.LayerNorm(clip_embed_dim)

@@ -14,16 +14,27 @@ import numpy as np
 import torch
 
 
-def one_hot(x, num_classes, on_value=1., off_value=0., device='cuda'):
-    x = x.long().view(-1, 1)
-    return torch.full((x.size()[0], num_classes), off_value, device=device).scatter_(1, x, on_value)
+def one_hot(x, num_classes, on_value=1., off_value=0., device='cuda', is_packed_target=None):
+    assert is_packed_target is not None
+    if not is_packed_target:
+        x = x.long().view(-1, 1)
+        return torch.full((x.size()[0], num_classes), off_value, device=device).scatter_(1, x, on_value)
+    else:
+        digits = x.unsqueeze(1) // 10 ** torch.arange(15, -1, -1, device=device)
+        digits = (digits % 10).long()  # shape: (batch, 16)
+
+        batch_size, num_digits = digits.shape
+        out = torch.full((batch_size, num_digits, num_classes), off_value, device=device)
+        out = out.scatter_(2, digits.unsqueeze(2), on_value)
+        out = out.reshape(batch_size * num_digits, num_classes)
+        return out
 
 
-def mixup_target(target, num_classes, lam=1., smoothing=0.0, device='cuda'):
+def mixup_target(target, num_classes, lam=1., smoothing=0.0, device='cuda', is_packed_target=None):
     off_value = smoothing / num_classes
     on_value = 1. - smoothing + off_value
-    y1 = one_hot(target, num_classes, on_value=on_value, off_value=off_value, device=device)
-    y2 = one_hot(target.flip(0), num_classes, on_value=on_value, off_value=off_value, device=device)
+    y1 = one_hot(target, num_classes, on_value=on_value, off_value=off_value, device=device, is_packed_target=is_packed_target)
+    y2 = one_hot(target.flip(0), num_classes, on_value=on_value, off_value=off_value, device=device, is_packed_target=is_packed_target)
     return y1 * lam + y2 * (1. - lam)
 
 
@@ -102,7 +113,7 @@ class Mixup:
         num_classes (int): number of classes for target
     """
     def __init__(self, mixup_alpha=1., cutmix_alpha=0., cutmix_minmax=None, prob=1.0, switch_prob=0.5,
-                 mode='batch', correct_lam=True, label_smoothing=0.1, num_classes=1000):
+                 mode='batch', correct_lam=True, label_smoothing=0.1, num_classes=1000, is_packed_target=None):
         self.mixup_alpha = mixup_alpha
         self.cutmix_alpha = cutmix_alpha
         self.cutmix_minmax = cutmix_minmax
@@ -117,6 +128,7 @@ class Mixup:
         self.mode = mode
         self.correct_lam = correct_lam  # correct lambda based on clipped area for cutmix
         self.mixup_enabled = True  # set to false to disable mixing (intended tp be set by train loop)
+        self.is_packed_target = is_packed_target
 
     def _params_per_elem(self, batch_size):
         lam = np.ones(batch_size, dtype=np.float32)
@@ -214,8 +226,8 @@ class Mixup:
             lam = self._mix_pair(x)
         else:
             lam = self._mix_batch(x)
-        target = mixup_target(target, self.num_classes, lam, self.label_smoothing, x.device)
-        return x, target
+        new_target = mixup_target(target, self.num_classes, lam, self.label_smoothing, x.device, is_packed_target=self.is_packed_target)
+        return x, new_target
 
 
 class FastCollateMixup(Mixup):

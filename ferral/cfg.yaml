@@ -1,0 +1,16 @@
+run_name: hf_model3
+model_name: HuggingFaceTB/SmolVLM2-256M-Instruct
+data:
+  prefix: /home/petr/home_datasets/videos16
+  data_path: /data/petr/caltech_mice/16frame_single
+training:
+  epochs: 10
+  train_bs: 8
+  val_bs: 64
+  num_workers: 16
+  warmup_epochs: 2
+  lr: 3.0e-4
+  weight_decay: 0.1
+model:
+  num_classes: 4
+class_names: "{0: 'attack', 1: 'invest', 2: 'mount', 3: 'other'}"

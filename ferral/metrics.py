@@ -24,6 +24,7 @@ def calc_frame_level_map(ans, is_frame_level, class_names):
 
     for el in ans:
         name = el[0]
+        name = name.split('.')[0]
         preds = np.array(el[1])
         fn = name.split('F')[1]
         if is_frame_level:
@@ -59,7 +60,7 @@ def calc_frame_level_map(ans, is_frame_level, class_names):
         if cls_name != 'other':
             aps.append(ap)
         res[f'ap_{cls_name}'] = ap 
-    return {'frame_level_map': sum(aps) / len(aps)}
+    return sum(aps) / len(aps)
 
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
     class_names = eval(class_names) # {0: 'attack', 1: 'invest', 2: 'mount', 3: 'other'}

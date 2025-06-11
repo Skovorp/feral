@@ -2,6 +2,14 @@ import pandas as pd
 import torchvision
 from transformers import AutoProcessor
 import os
+import decord
+from decord import VideoReader, cpu
+import torch
+
+def read_video_decord(path):
+    vr = VideoReader(path)
+    video = vr.get_batch(range(len(vr))).asnumpy()  # (T, H, W, C)
+    return torch.from_numpy(video).permute(0, 3, 1, 2)
 
 class ClsDataset():
     def __init__(self, partition, model_name, data_path, prefix, **kwargs):
@@ -15,8 +23,9 @@ class ClsDataset():
     def __getitem__(self, index):
         sample = self.dataset_samples[index]
         pth = os.path.join(self.prefix, sample)
-        video, _, _ = torchvision.io.read_video(pth, pts_unit='sec')
-        video = video.permute(0, 3, 1, 2)  # (T, C, H, W)
+        # video, _, _ = torchvision.io.read_video(pth, pts_unit='sec')
+        # video = video.permute(0, 3, 1, 2)  # (T, C, H, W)
+        video = read_video_decord(pth)
         outputs = self.processor(videos=video, return_tensors="pt")['pixel_values'][0]
         if self.partition == 'train':
             return outputs, self.label_array[index]

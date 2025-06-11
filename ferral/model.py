@@ -37,14 +37,14 @@ class HFModel(nn.Module):
         ).model.vision_model
         # print(self.model.model.vision_model.state_dict().values())
         self.clip_projector = AttentionPoolingBlockCustom(
-            embed_dim=768, num_heads=16, qkv_bias=True, qk_scale=None,
+            embed_dim=1152, num_heads=16, qkv_bias=True, qk_scale=None,
             drop=0., attn_drop=0., drop_path=0.1, 
             norm_layer=partial(nn.LayerNorm, eps=1e-5), out_tokens=0
         )
-        self.fc_norm = nn.BatchNorm1d(768) # nn.LayerNorm(clip_embed_dim)
+        self.fc_norm = nn.BatchNorm1d(1152) # nn.LayerNorm(clip_embed_dim)
         # self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
         self.fc_dropout = nn.Identity()
-        self.head = nn.Linear(768, num_classes)
+        self.head = nn.Linear(1152, num_classes)
 
 
     def forward(self, x):

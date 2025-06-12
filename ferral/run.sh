@@ -1,0 +1,1 @@
+srun -p h100 --gres=gpu:1 --cpus-per-task=16 /bin/bash -c "cd /home/petr/veles/InternVideo/ferral && /home/petr/miniconda3/envs/for_transformers/bin/python train.py"

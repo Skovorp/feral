@@ -43,7 +43,6 @@ def calc_frame_level_map(ans, is_frame_level, class_names):
 
     preds = []
     targets = []
-
     for key in logits.keys():
         preds.append(logits[key])
         targets.append(all_data[key])
@@ -66,6 +65,7 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
     class_names = eval(class_names) # {0: 'attack', 1: 'invest', 2: 'mount', 3: 'other'}
     preds = np.array([x[-2] for x in ans])
     targets = np.array([x[-1] for x in ans])
+    targets = targets.argmax(1)
 
     aps = []
     res = {}

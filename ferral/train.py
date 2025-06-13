@@ -18,7 +18,7 @@ from torchvision.transforms.v2 import MixUp
 
 
 
-with open('cfg.yaml', 'r') as f:
+with open('configs/cfg.yaml', 'r') as f:
     cfg = yaml.safe_load(f)
 
 torch.manual_seed(cfg['seed'])
@@ -30,17 +30,17 @@ wandb.init(
     project="Veles",
     name=cfg['run_name'],
     config=cfg,
-    mode='disabled'
+    # mode='disabled'
 )
 
-train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'], 
+train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
                            num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
 val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                          num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
 
-train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, 
+train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, in_order=False, persistent_workers=True,
                           batch_size=cfg['training']['train_bs'], num_workers=cfg['training']['num_workers'])
-val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, 
+val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=True,
                         batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'])
 
 device = torch.device('cuda')
@@ -82,24 +82,25 @@ for epoch in range(cfg['training']['epochs']):
     model.train()
     answers = []
     losses = []
+    eye = torch.eye(cfg['training']['train_bs'], device=device)
     for data, target in tqdm(train_loader, total=len(train_loader)):
         data = data.to(device)
         target = target.to(device)
-
-        if mixup is not None:
-            N, T, C, A, B = data.shape
-            data = data.reshape(N, T, C, A * B)
-            data, mix = mixup(data, torch.eye(data.shape[0], device=device))
-            data = data.reshape(N, T, C, A, B)
-            if cfg['predict_per_item'] != 1:
-                target = target.permute(1, 0, 2)
-                target = mix.unsqueeze(0) @ target
-                target = target.permute(1, 0, 2)
-            else:
-                target = mix @ target 
-        target = target.view(-1, cfg['num_classes'])
         optimizer.zero_grad()
+
         with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+            if mixup is not None:
+                N, T, C, A, B = data.shape
+                data = data.reshape(N, T, C, A * B)
+                data, mix = mixup(data, eye)
+                data = data.reshape(N, T, C, A, B)
+                if cfg['predict_per_item'] != 1:
+                    target = target.permute(1, 0, 2)
+                    target = mix.unsqueeze(0) @ target
+                    target = target.permute(1, 0, 2)
+                else:
+                    target = mix @ target 
+            target = target.view(-1, cfg['num_classes'])
             output = model(data)
             loss = criterion(output, target)
 
@@ -113,7 +114,6 @@ for epoch in range(cfg['training']['epochs']):
         })
         answers.extend(list(zip(output.cpu().detach().tolist(), target.cpu().detach().tolist())))
         losses.append(loss.item())
-        break
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'train'),
         'train_loss': sum(losses) / len(losses)
@@ -141,7 +141,6 @@ for epoch in range(cfg['training']['epochs']):
                 loss_ema = criterion(output_ema, target)
                 answers_ema.extend(list(zip(names, output_ema.cpu().detach().tolist(), target.cpu().detach().tolist())))
                 losses_ema.append(loss.item())
-                break
     with open(f"answers/{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.json", 'w') as f:
         json.dump(answers, f)
     logs = {

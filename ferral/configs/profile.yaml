@@ -1,11 +1,10 @@
-run_name: hf_500M_512_and_more
 model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
 predict_per_item: 1
 num_classes: 4
 data:
   prefix: /home/petr/home_datasets/videos16
   data_path: /data/petr/caltech_mice/16frame_single
-  rescale_to: 512
+  rescale_to: 256
   do_aa: true
 training:
   epochs: 10

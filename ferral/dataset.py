@@ -7,6 +7,7 @@ from decord import VideoReader, cpu
 import torch
 from torchvision.transforms.v2 import AutoAugment
 from torch.nn.functional import one_hot
+import time
 
 def read_video_decord(path):
     vr = VideoReader(path)
@@ -26,9 +27,13 @@ class ClsDataset():
         cleaned = pd.read_csv(os.path.join(data_path, partition + '.csv'), header=None, delimiter=',')
         self.dataset_samples = list(cleaned.values[:, 0])
         self.label_array = list(cleaned.values[:, 1])
-        self.processor = AutoProcessor.from_pretrained(model_name)
-        self.processor.video_processor.video_sampling['video_size']['longest_edge'] = rescale_to
-        self.processor.video_processor.max_image_size['longest_edge'] = rescale_to
+        # self.processor = AutoProcessor.from_pretrained(model_name)
+        # self.processor.video_processor.video_sampling['video_size']['longest_edge'] = rescale_to
+        # self.processor.video_processor.max_image_size['longest_edge'] = rescale_to
+
+        self.resize = torchvision.transforms.v2.Resize((rescale_to, rescale_to), antialias=True)
+        self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        self.scale = 0.00392156862745098
 
     def proc_target(self, target):
         target = torch.tensor(target).long()
@@ -44,8 +49,10 @@ class ClsDataset():
         # video, _, _ = torchvision.io.read_video(pth, pts_unit='sec')
         # video = video.permute(0, 3, 1, 2)  # (T, C, H, W)
         video = read_video_decord(pth)
+        # outputs = self.processor(videos=video, return_tensors="pt")['pixel_values'][0]
+        video = self.resize(video)
         video = video if self.aug is None else self.aug(video)
-        outputs = self.processor(videos=video, return_tensors="pt")['pixel_values'][0]
+        outputs = self.norm(video * self.scale)
         label = self.label_array[index]
         label = self.proc_target(label)
         if self.partition == 'train':
@@ -57,8 +64,10 @@ class ClsDataset():
     def __len__(self):
         return len(self.dataset_samples)
 
-    
 if __name__ == "__main__":
-    ds = ClsDataset('train', 'HuggingFaceTB/SmolVLM2-500M-Instruct', '/data/petr/caltech_mice/16frame_single', '/home/petr/home_datasets/videos16', 768)
-    vid = ds[0][0]
-    print(vid.shape)
+    ds = ClsDataset('train', 'HuggingFaceTB/SmolVLM2-500M-Instruct', '/data/petr/caltech_mice/16frame_single', '/home/petr/home_datasets/videos16', 512, do_aa=True, predict_per_item=1, num_classes=4)
+
+    for i in range(1000):
+        st = time.time()
+        _ = ds[i]
+        print((time.time() - st) * 1000)

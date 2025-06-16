@@ -24,7 +24,6 @@ def calc_frame_level_map(ans, is_frame_level, class_names):
 
     for el in ans:
         name = el[0]
-        name = name.split('.')[0]
         preds = np.array(el[1])
         fn = name.split('F')[1]
         if is_frame_level:

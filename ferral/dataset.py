@@ -44,7 +44,8 @@ class ClsDataset():
         return target
     
     def proc_names(self, sample):
-        if self.predict_per_item> 1:
+        sample = sample.split('.')[0]
+        if self.predict_per_item > 1:
             sample = [f"{sample}_{i}" for i in range(self.predict_per_item)]
         return sample
 
@@ -70,10 +71,26 @@ class ClsDataset():
     def __len__(self):
         return len(self.dataset_samples)
 
-if __name__ == "__main__":
-    ds = ClsDataset('train', 'HuggingFaceTB/SmolVLM2-500M-Instruct', '/data/petr/caltech_mice/16frame_single', '/home/petr/home_datasets/videos16', 512, do_aa=True, predict_per_item=1, num_classes=4)
 
-    for i in range(1000):
-        st = time.time()
-        _ = ds[i]
-        print((time.time() - st) * 1000)
+def collate_fn_val(batch):
+    tensors, targets, names = zip(*batch)
+    tensors = torch.stack(tensors)
+    targets = torch.stack(targets)
+    return tensors, targets, names
+
+
+if __name__ == "__main__":
+    # ds = ClsDataset('train', 'HuggingFaceTB/SmolVLM2-500M-Instruct', '/data/petr/caltech_mice/16frame_single', '/home/petr/home_datasets/videos16', 512, do_aa=True, predict_per_item=1, num_classes=4)
+
+    # for i in range(1000):
+    #     st = time.time()
+    #     _ = ds[i]
+    #     print((time.time() - st) * 1000)
+    ds = ClsDataset('val', 'HuggingFaceTB/SmolVLM2-500M-Insprint(truct', '/data/petr/caltech_mice/16frames_multiple', '/home/petr/home_datasets/videos16', 512, do_aa=True, predict_per_item=16, num_classes=4)
+    print(ds[0])
+    from torch.utils.data import DataLoader
+    val_loader = DataLoader(ds, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=True,
+                        batch_size=64, num_workers=1, collate_fn=collate_fn_val)
+    t = next(iter(val_loader))[2]
+    print(len(t), len(t[0]))
+    print(t)

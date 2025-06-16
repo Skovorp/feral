@@ -1,4 +1,4 @@
-run_name: hf_500M_256_every_frame
+run_name: hf_500M_256_every_frame_fixeval2
 model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
 predict_per_item: 16
 num_classes: 4

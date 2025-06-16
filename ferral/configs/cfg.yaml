@@ -1,10 +1,10 @@
-run_name: hf_500M_256_with_mixup_again_bigger_bs
+run_name: hf_500M_256_every_frame
 model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
-predict_per_item: 1
+predict_per_item: 16
 num_classes: 4
 data:
   prefix: /home/petr/home_datasets/videos16
-  data_path: /data/petr/caltech_mice/16frame_single
+  data_path: /data/petr/caltech_mice/16frames_multiple
   rescale_to: 256
   do_aa: true
 training:

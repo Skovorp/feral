@@ -27,7 +27,7 @@ class AttentionPoolingBlockCustom(nn.Module):
 
 
 class HFModel(nn.Module):
-    def __init__(self, model_name, num_classes, **kwargs):
+    def __init__(self, model_name, num_classes, predict_per_item, **kwargs):
         super().__init__()
         self.model = AutoModelForImageTextToText.from_pretrained(
             model_name,
@@ -37,7 +37,7 @@ class HFModel(nn.Module):
         self.clip_projector = AttentionPoolingBlockCustom(
             embed_dim=backbone_dim, num_heads=16, qkv_bias=True, qk_scale=None,
             drop=0., attn_drop=0., drop_path=0.1, 
-            norm_layer=partial(nn.LayerNorm, eps=1e-5), out_tokens=0
+            norm_layer=partial(nn.LayerNorm, eps=1e-5), out_tokens=predict_per_item
         )
         self.fc_norm = nn.BatchNorm1d(backbone_dim) # nn.LayerNorm(clip_embed_dim)
         # self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()

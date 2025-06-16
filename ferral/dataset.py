@@ -37,11 +37,17 @@ class ClsDataset():
 
     def proc_target(self, target):
         target = torch.tensor(target).long()
-        if self.predict_per_item != 1:
-            target = target.unsqueeze(1) // 10 ** torch.arange(self.predict_per_item - 1, -1, -1, device=target.device)
+        if self.predict_per_item > 1:
+            target = target.unsqueeze(0) // 10 ** torch.arange(self.predict_per_item - 1, -1, -1, device=target.device)
             target = target % 10
         target = one_hot(target, self.num_classes).float() 
         return target
+    
+    def proc_names(self, sample):
+        if self.predict_per_item> 1:
+            sample = [f"{sample}_{i}" for i in range(self.predict_per_item)]
+        return sample
+
 
     def __getitem__(self, index):
         sample = self.dataset_samples[index]
@@ -58,7 +64,7 @@ class ClsDataset():
         if self.partition == 'train':
             return outputs, label
         else:
-            return outputs, label, sample # TODO: fix sample for packed, make sure that logs work
+            return outputs, label, self.proc_names(sample)
     
     
     def __len__(self):

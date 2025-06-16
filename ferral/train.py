@@ -13,6 +13,7 @@ import numpy as np
 import random
 
 from metrics import calculate_multiclass_metrics, calc_frame_level_map
+from utils import prep_for_answers
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 
@@ -45,7 +46,7 @@ val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=F
 
 device = torch.device('cuda')
 
-model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'])
+model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
 model.to(device)
 model.train()
 
@@ -100,7 +101,7 @@ for epoch in range(cfg['training']['epochs']):
                     target = target.permute(1, 0, 2)
                 else:
                     target = mix @ target 
-            target = target.view(-1, cfg['num_classes'])
+            target = target.reshape(-1, cfg['num_classes'])
             output = model(data)
             loss = criterion(output, target)
 
@@ -112,7 +113,8 @@ for epoch in range(cfg['training']['epochs']):
             'batch_loss': loss.item(), 
             'lr': lr_scheduler.get_last_lr()[0]
         })
-        answers.extend(list(zip(output.cpu().detach().tolist(), target.cpu().detach().tolist())))
+
+        answers.extend(prep_for_answers(output, target))
         losses.append(loss.item())
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'train'),
@@ -134,12 +136,12 @@ for epoch in range(cfg['training']['epochs']):
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                 output = model(data)
                 loss = criterion(output, target)
-                answers.extend(list(zip(names, output.cpu().detach().tolist(), target.cpu().detach().tolist())))
+                answers.extend(prep_for_answers(output, target, names))
                 losses.append(loss.item())
 
                 output_ema = model_ema.ema(data)
                 loss_ema = criterion(output_ema, target)
-                answers_ema.extend(list(zip(names, output_ema.cpu().detach().tolist(), target.cpu().detach().tolist())))
+                answers_ema.extend(prep_for_answers(output_ema, target, names))
                 losses_ema.append(loss.item())
     with open(f"answers/{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.json", 'w') as f:
         json.dump(answers, f)

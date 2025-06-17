@@ -44,9 +44,9 @@ train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
 val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                          num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
 
-train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, in_order=False, persistent_workers=True,
+train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, in_order=False, persistent_workers=False,
                           batch_size=cfg['training']['train_bs'], num_workers=cfg['training']['num_workers'])
-val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=True,
+val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=False,
                         batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
 
 device = torch.device('cuda')
@@ -150,7 +150,7 @@ for epoch in range(cfg['training']['epochs']):
                 answers_ema.extend(prep_for_answers(output_ema, target, names))
                 losses_ema.append(loss.item())
                 break
-    with open(f"answers/{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.json", 'w') as f:
+    with open(os.path.join("answers", f"{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"), 'w') as f:
         json.dump(answers, f)
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'val'),
@@ -162,4 +162,3 @@ for epoch in range(cfg['training']['epochs']):
     }
     print(logs)
     wandb.log(logs)
-

@@ -8,7 +8,7 @@ import torch
 from torchvision.transforms.v2 import AutoAugment
 from torch.nn.functional import one_hot
 import time
-import av
+# import av
 import numpy as np
 
 def read_single_video_decord(path):

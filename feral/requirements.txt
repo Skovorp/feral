@@ -1,3 +1,7 @@
 pandas
 scikit-learn
 decord
+transformers
+wandb
+timm
+hf_xet

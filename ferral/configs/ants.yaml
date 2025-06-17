@@ -1,17 +1,18 @@
-run_name: hf_500M_256_every_8xlr
+run_name: ants_jacopo
 model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
 predict_per_item: 16
 num_classes: 4
 data:
-  prefix: /home/petr/home_datasets/videos16 # folder with videos 
-  data_path: /data/petr/caltech_mice/16frames_multiple # folder with csv files
+  dataset_type: raw
+  prefix: /data/petr/ant_data/raw/raw_videos # folder with videos 
+  data_path: /data/petr/ant_data/16_multiple_raw # folder with csv files
   rescale_to: 256
   do_aa: true
 training:
   epochs: 10
   train_bs: 32
   val_bs: 64
-  num_workers: 16
+  num_workers: 2
   warmup_epochs: 2
   lr: 2.0e-5
   weight_decay: 0.1

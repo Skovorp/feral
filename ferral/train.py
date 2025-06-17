@@ -16,11 +16,16 @@ from metrics import calculate_multiclass_metrics, calc_frame_level_map
 from utils import prep_for_answers
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
+import sys
+import os
 
+assert len(sys.argv) > 1 and len(sys.argv[1]) > 0, "Usage: python train.py <path_to_config.yaml>"
+config_path = sys.argv[1]
 
-
-with open('configs/cfg.yaml', 'r') as f:
+with open(config_path, 'r') as f:
     cfg = yaml.safe_load(f)
+
+os.makedirs("answers", exist_ok=True)
 
 torch.manual_seed(cfg['seed'])
 np.random.seed(cfg['seed'])
@@ -116,7 +121,7 @@ for epoch in range(cfg['training']['epochs']):
 
         answers.extend(prep_for_answers(output, target))
         losses.append(loss.item())
-        # break
+        break
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'train'),
         'train_loss': sum(losses) / len(losses)
@@ -144,15 +149,15 @@ for epoch in range(cfg['training']['epochs']):
                 loss_ema = criterion(output_ema, target)
                 answers_ema.extend(prep_for_answers(output_ema, target, names))
                 losses_ema.append(loss.item())
-                # break
+                break
     with open(f"answers/{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.json", 'w') as f:
         json.dump(answers, f)
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'val'),
         **calculate_multiclass_metrics(answers_ema, cfg['class_names'], 'ema_val'),
-        'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, cfg['class_names']),
+        # 'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, cfg['class_names']),
         'val_loss': sum(losses) / len(losses),
-        'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, cfg['class_names']),
+        # 'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, cfg['class_names']),
         'ema_val_loss': sum(losses_ema) / len(losses_ema),
     }
     print(logs)

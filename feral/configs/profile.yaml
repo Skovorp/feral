@@ -1,0 +1,20 @@
+model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
+predict_per_item: 1
+num_classes: 4
+data:
+  prefix: /home/petr/home_datasets/videos16
+  data_path: /data/petr/caltech_mice/16frame_single
+  rescale_to: 256
+  do_aa: true
+training:
+  epochs: 10
+  train_bs: 8
+  val_bs: 64
+  num_workers: 16
+  warmup_epochs: 2
+  lr: 1.0e-4
+  weight_decay: 0.1
+class_names: "{0: 'attack', 1: 'invest', 2: 'mount', 3: 'other'}"
+mixup_alpha: 0.8
+ema_decay: 0.999
+seed: 0

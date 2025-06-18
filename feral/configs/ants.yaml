@@ -1,20 +1,23 @@
-run_name: ants_jacopo
+run_name: debug
 model_name: HuggingFaceTB/SmolVLM2-500M-Instruct
 predict_per_item: 16
 num_classes: 3
 data:
-  dataset_type: raw
-  prefix: E:\ants_dominic\raw_videos # folder with videos 
-  data_path: E:\ants_dominic\16_multiple_raw # folder with csv files
-  rescale_to: 256
+  prefix: /home/petr001/ant_data/ants_stuff/raw_videos
+  label_json: /home/petr001/ant_data/ants_stuff/ant_all_labels.json
+  cache_dir: /home/petr001/ant_data/ants_stuff/cache_256
+  chunk_length: 16
+  chunk_shift: 8
+  resize_to: 256
   do_aa: true
+  preproc_processes: 10
 training:
   epochs: 10
-  train_bs: 1
-  val_bs: 1
-  num_workers: 0
+  train_bs: 16
+  val_bs: 64
+  num_workers: 1
   warmup_epochs: 2
-  lr: 2.0e-5
+  lr: 4.0e-5
   weight_decay: 0.1
 class_names: "{0: 'other', 1: 'self', 2: 'larvae'}"
 mixup_alpha: 0.8

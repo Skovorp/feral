@@ -5,3 +5,4 @@ transformers
 wandb
 timm
 hf_xet
+opencv-python

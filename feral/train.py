@@ -1,5 +1,5 @@
 from model import HFModel
-from dataset import ClsDataset, collate_fn_val
+from new_dataset import ClsDataset, collate_fn_val
 import yaml
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -36,7 +36,7 @@ wandb.init(
     project="Veles",
     name=cfg['run_name'],
     config=cfg,
-    # mode='disabled'
+    mode='disabled' if cfg['run_name'] == 'debug' else 'online'
 )
 
 train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
@@ -54,14 +54,6 @@ device = torch.device('cuda')
 model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
 model.to(device)
 model.train()
-
-# # make batchnorm stats ok
-# with torch.no_grad():
-#     for it, (data, _), in enumerate(train_loader):
-#         if it >= 10:
-#             break
-#         data = data.to(device)
-#         model(data)losses_ema
 
 model_ema = ModelEma(
     model,
@@ -121,7 +113,8 @@ for epoch in range(cfg['training']['epochs']):
 
         answers.extend(prep_for_answers(output, target))
         losses.append(loss.item())
-        break
+        if cfg['run_name'] == 'debug':
+            break
     logs = {
         **calculate_multiclass_metrics(answers, cfg['class_names'], 'train'),
         'train_loss': sum(losses) / len(losses)
@@ -149,7 +142,8 @@ for epoch in range(cfg['training']['epochs']):
                 loss_ema = criterion(output_ema, target)
                 answers_ema.extend(prep_for_answers(output_ema, target, names))
                 losses_ema.append(loss.item())
-                break
+                if cfg['run_name'] == 'debug':
+                    break
     with open(os.path.join("answers", f"{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"), 'w') as f:
         json.dump(answers, f)
     logs = {

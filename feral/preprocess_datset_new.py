@@ -130,8 +130,8 @@ def make_label_csv(data, cache_dir):
         'partition': partitions
     })
     df['name'] = df['name'].apply(lambda x: os.path.basename(x))
-    df[df['partition'] == 'train'][['name', 'lbl']].to_csv(os.path.join(cache_dir, 'train2.csv'), index=False, header=False)
-    df[df['partition'] == 'val'][['name', 'lbl']].to_csv(os.path.join(cache_dir, 'val2.csv'), index=False, header=False)
+    df[df['partition'] == 'train'][['name', 'lbl']].to_csv(os.path.join(cache_dir, 'train.csv'), index=False, header=False)
+    df[df['partition'] == 'val'][['name', 'lbl']].to_csv(os.path.join(cache_dir, 'val.csv'), index=False, header=False)
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)

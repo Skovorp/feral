@@ -21,7 +21,7 @@ class AttentionPoolingBlockCustom(nn.Module):
         else:
             x_q = self.x_q.unsqueeze(0).expand(x.size(0), -1, -1)
         x_kv = x
-        attn_output, _ = self.attn(x_q, x_kv, x_kv)
+        attn_output, _ = self.attn(x_q, x_kv, x_kv, need_weights=False)
         attn_output = attn_output.reshape(-1, x.shape[2])
         return attn_output
 

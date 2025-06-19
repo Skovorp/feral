@@ -19,6 +19,9 @@ from torchvision.transforms.v2 import MixUp
 import sys
 import os
 
+torch.backends.cuda.enable_math_sdp(False)
+torch.backends.cuda.enable_mem_efficient_sdp(False)
+
 def main(config_path):
     with open(config_path, 'r') as f:
         cfg = yaml.safe_load(f)
@@ -47,7 +50,7 @@ def main(config_path):
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
 
-    device = torch.device('cuda')
+    device = torch.device('cuda:2')
 
     model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
     model.to(device)
@@ -56,7 +59,7 @@ def main(config_path):
     model_ema = ModelEma(
         model,
         decay=cfg['ema_decay'],
-        device='cuda'
+        device='cuda:2'
     )
 
     tot = 0

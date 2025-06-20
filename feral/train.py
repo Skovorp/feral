@@ -54,6 +54,9 @@ def main(config_path):
 
     model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
     model.to(device)
+    
+    model = torch.compile(model, mode="max-autotune")
+
     model.train()
 
     model_ema = ModelEma(

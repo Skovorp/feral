@@ -45,21 +45,25 @@ def main(config_path):
     val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                             num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
 
-    train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, in_order=False, persistent_workers=cfg['training']['num_workers'] > 0,
+
+    train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['train_bs'], num_workers=cfg['training']['num_workers'])
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
 
-    device = torch.device('cuda:2')
+    device = torch.device('cuda')
 
     model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
     model.to(device)
+    
+    model = torch.compile(model, mode="max-autotune")
+
     model.train()
 
     model_ema = ModelEma(
         model,
         decay=cfg['ema_decay'],
-        device='cuda:2'
+        device='cuda'
     )
 
     tot = 0

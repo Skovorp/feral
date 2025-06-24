@@ -17,6 +17,7 @@ from multiprocessing import Manager, Value, Lock
 import threading
 import time
 import re
+import sys
 
 class SequentialReader():
     def __init__(self, path, start_ind):
@@ -110,7 +111,7 @@ def get_frame_count(video_path):
     cap.release()
     return frame_count
 
-def make_label_csv(data, cache_dir):
+def make_label_csv(data, cache_dir, file_ext):
     cache = os.listdir(os.path.join(cache_dir, 'data'))
     labels = []
     partitions = []
@@ -121,7 +122,7 @@ def make_label_csv(data, cache_dir):
         from_num = int(match.group(2))
         to_num = int(match.group(3))
         lbls = data['labels'][name + '.mp4']['frame_labels'][from_num : to_num + 1]
-        partitions.append(data['labels'][name + '.mp4']['partition'])
+        partitions.append(data['labels'][name + file_ext]['partition'])
         labels.append(lbls)
     
     df = pd.DataFrame({
@@ -134,9 +135,12 @@ def make_label_csv(data, cache_dir):
     df[df['partition'] == 'val'][['name', 'lbl']].to_csv(os.path.join(cache_dir, 'val.csv'), index=False, header=False)
 
 if __name__ == "__main__":
+    assert len(sys.argv) > 1 and len(sys.argv[1]) > 0, "Usage: python preprocess_datset.py <path_to_config.yaml>"
+    config_path = sys.argv[1]
+
     multiprocessing.set_start_method("spawn", force=True)
 
-    with open('configs/ants.yaml', 'r') as f:
+    with open(config_path, 'r') as f:
         cfg = yaml.safe_load(f)
 
     os.makedirs(cfg['data']['cache_dir'], exist_ok=True)
@@ -150,6 +154,9 @@ if __name__ == "__main__":
 
     vids = [os.path.join(cfg['data']['prefix'], x) for x in label_json['labels'].keys()]
     print(vids)
+
+    assert len(set([x.split('.')[1] for x in vids])) == 1, f"found different extentions in video files: {set([x.split('.')[1] for x in vids])}"
+    file_ext = '.' + list(set([x.split('.')[1] for x in vids]))[0]
 
     dfs = []
     for vid in vids:
@@ -167,4 +174,4 @@ if __name__ == "__main__":
         dfs.append(this_df)
 
     main(dfs, file_outp_dir, cfg['data']['preproc_processes'])
-    make_label_csv(label_json, cfg['data']['cache_dir'])
+    make_label_csv(label_json, cfg['data']['cache_dir'], file_ext)

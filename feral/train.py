@@ -26,6 +26,12 @@ def main(config_path):
     with open(config_path, 'r') as f:
         cfg = yaml.safe_load(f)
 
+    with open(cfg['data']['label_json'], 'r') as f:
+        labels_json = json.load(f)
+    class_names = {int(x): y for x, y in labels_json['class_names'].items()}
+    full_labels = labels_json['labels']
+    num_classes = len(class_names)
+
     os.makedirs("answers", exist_ok=True)
 
     torch.manual_seed(cfg['seed'])
@@ -41,9 +47,9 @@ def main(config_path):
     )
 
     train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
-                            num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
+                            num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
     val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
-                            num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'], **cfg['data'])
+                            num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
 
 
     train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, persistent_workers=cfg['training']['num_workers'] > 0,
@@ -53,10 +59,10 @@ def main(config_path):
 
     device = torch.device('cuda')
 
-    model = HFModel(model_name=cfg['model_name'], num_classes=cfg['num_classes'], predict_per_item=cfg['predict_per_item'])
+    model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'])
     model.to(device)
     
-    model = torch.compile(model, mode="max-autotune")
+    # model = torch.compile(model, mode="max-autotune")
 
     model.train()
 
@@ -103,7 +109,7 @@ def main(config_path):
                         target = target.permute(1, 0, 2)
                     else:
                         target = mix @ target 
-                target = target.reshape(-1, cfg['num_classes'])
+                target = target.reshape(-1, num_classes)
                 output = model(data)
                 loss = criterion(output, target)
 
@@ -121,7 +127,7 @@ def main(config_path):
             if cfg['run_name'] == 'debug':
                 break
         logs = {
-            **calculate_multiclass_metrics(answers, cfg['class_names'], 'train'),
+            **calculate_multiclass_metrics(answers, class_names, 'train'),
             'train_loss': sum(losses) / len(losses)
         }
         print(logs)
@@ -136,7 +142,7 @@ def main(config_path):
             for data, target, names in tqdm(val_loader, total=len(val_loader)):
                 data = data.to(device)
                 target = target.to(device)
-                target = target.view(-1, cfg['num_classes'])
+                target = target.view(-1, num_classes)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = model(data)
                     loss = criterion(output, target)
@@ -152,11 +158,11 @@ def main(config_path):
         with open(os.path.join("answers", f"{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"), 'w') as f:
             json.dump(answers, f)
         logs = {
-            **calculate_multiclass_metrics(answers, cfg['class_names'], 'val'),
-            **calculate_multiclass_metrics(answers_ema, cfg['class_names'], 'ema_val'),
-            # 'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, cfg['class_names']),
+            **calculate_multiclass_metrics(answers, class_names, 'val'),
+            **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
+            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, class_names, full_labels, 'val'),
             'val_loss': sum(losses) / len(losses),
-            # 'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, cfg['class_names']),
+            'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, full_labels, 'val'),
             'ema_val_loss': sum(losses_ema) / len(losses_ema),
         }
         print(logs)

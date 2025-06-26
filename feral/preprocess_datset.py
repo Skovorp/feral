@@ -121,7 +121,7 @@ def make_label_csv(data, cache_dir, file_ext):
         name = match.group(1)
         from_num = int(match.group(2))
         to_num = int(match.group(3))
-        lbls = data['labels'][name + '.mp4']['frame_labels'][from_num : to_num + 1]
+        lbls = data['labels'][name]['frame_labels'][from_num : to_num + 1]
         partitions.append(data['labels'][name + file_ext]['partition'])
         labels.append(lbls)
     
@@ -155,9 +155,6 @@ if __name__ == "__main__":
     vids = [os.path.join(cfg['data']['prefix'], x) for x in label_json['labels'].keys()]
     print(vids)
 
-    assert len(set([x.split('.')[1] for x in vids])) == 1, f"found different extentions in video files: {set([x.split('.')[1] for x in vids])}"
-    file_ext = '.' + list(set([x.split('.')[1] for x in vids]))[0]
-
     dfs = []
     for vid in vids:
         frames = get_frame_ids(get_frame_count(vid), chunk_shift=cfg['data']['chunk_shift'], chunk_length=cfg['data']['chunk_length'])
@@ -169,9 +166,9 @@ if __name__ == "__main__":
         })
         assert len(this_df) != 0, f"df for {vid} is empty. this video has {get_frame_count(vid)} frames. Trying to get these frames: {frames[:3]}..."
 
-        pth = os.path.join(file_outp_dir, os.path.basename(vid).split('.')[0])
+        pth = os.path.join(file_outp_dir, os.path.basename(vid))
         this_df['outp_path'] = this_df.apply(lambda row: f"{pth}_from_{row['first_frame']}_to_{row['last_frame']}", axis=1)
         dfs.append(this_df)
 
     main(dfs, file_outp_dir, cfg['data']['preproc_processes'])
-    make_label_csv(label_json, cfg['data']['cache_dir'], file_ext)
+    make_label_csv(label_json, cfg['data']['cache_dir'])

@@ -1,0 +1,23 @@
+run_name: debug
+model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
+predict_per_item: 16
+data:
+  prefix: "/workspace/videos_storage"
+  label_json: "/workspace/behavioral_labels.json"
+  cache_dir: "/workspace/video_cache"
+  chunk_length: 16
+  chunk_shift: 8
+  resize_to: 256
+  do_aa: true
+  preproc_processes: 10
+training:
+  epochs: 10
+  train_bs: 16
+  val_bs: 64
+  num_workers: 4
+  warmup_epochs: 2
+  lr: 4.0e-5
+  weight_decay: 0.1
+mixup_alpha: 0.8
+ema_decay: 0.999
+seed: 0

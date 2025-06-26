@@ -40,7 +40,9 @@ class ClsDataset():
         return target
     
     def proc_names(self, sample):
-        sample = sample.split('.')[0]
+        assert sample.endswith('.safetensor'), sample
+        sample = sample[:-11] # remove .safetensor
+        
         if self.predict_per_item > 1:
             sample = [f"{sample}_{i}" for i in range(self.predict_per_item)]
         return sample

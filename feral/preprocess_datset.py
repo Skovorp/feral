@@ -111,7 +111,7 @@ def get_frame_count(video_path):
     cap.release()
     return frame_count
 
-def make_label_csv(data, cache_dir, file_ext):
+def make_label_csv(data, cache_dir):
     cache = os.listdir(os.path.join(cache_dir, 'data'))
     labels = []
     partitions = []
@@ -122,7 +122,7 @@ def make_label_csv(data, cache_dir, file_ext):
         from_num = int(match.group(2))
         to_num = int(match.group(3))
         lbls = data['labels'][name]['frame_labels'][from_num : to_num + 1]
-        partitions.append(data['labels'][name + file_ext]['partition'])
+        partitions.append(data['labels'][name]['partition'])
         labels.append(lbls)
     
     df = pd.DataFrame({

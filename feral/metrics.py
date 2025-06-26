@@ -10,7 +10,7 @@ def calc_frame_level_map(ans, is_frame_level, class_names, full_labels, partitio
 
     for k, v in full_labels.items():
         if v['partition'] == partition:
-            all_data[k.split('.')[0]] = v['frame_labels']
+            all_data[k] = v['frame_labels']
 
     # only works with 16 frame chunks!
     if is_frame_level:

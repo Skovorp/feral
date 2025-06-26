@@ -9,11 +9,11 @@ data:
   chunk_shift: 8
   resize_to: 256
   do_aa: true
-  preproc_processes: 10
+  preproc_processes: 8 # DONT MAKE IT HIGHER! CPU OOM will brick the server
 training:
   epochs: 10
-  train_bs: 16
-  val_bs: 64
+  train_bs: 2
+  val_bs: 4
   num_workers: 4
   warmup_epochs: 2
   lr: 4.0e-5

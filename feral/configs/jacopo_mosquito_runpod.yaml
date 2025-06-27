@@ -1,4 +1,4 @@
-run_name: debug
+run_name: mosquitos_4090_compile
 model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
 predict_per_item: 16
 data:
@@ -9,14 +9,14 @@ data:
   chunk_shift: 8
   resize_to: 256
   do_aa: true
-  preproc_processes: 4 # DONT MAKE IT HIGHER! CPU OOM will brick the server
+  preproc_processes: 8 # DONT MAKE IT HIGHER! CPU OOM will brick the server
 training:
   epochs: 10
-  train_bs: 2
-  val_bs: 4
+  train_bs: 8
+  val_bs: 16
   num_workers: 4
   warmup_epochs: 2
-  lr: 4.0e-5
+  lr: 8.0e-5
   weight_decay: 0.1
 mixup_alpha: 0.8
 ema_decay: 0.999

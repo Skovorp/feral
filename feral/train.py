@@ -64,7 +64,7 @@ def main(config_path):
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'])
     model.to(device)
     
-    # model = torch.compile(model, mode="max-autotune")
+    model = torch.compile(model, mode="max-autotune")
 
     model.train()
 

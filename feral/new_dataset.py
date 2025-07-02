@@ -9,15 +9,21 @@ from torchvision.transforms.v2 import AutoAugment
 from torch.nn.functional import one_hot
 import numpy as np
 from safetensors import safe_open
-
+import re
 
 def load_tsr(pth):
     with safe_open(pth, framework="pt", device='cpu') as f:
         return f.get_tensor('data')
 
+def read_range_video_decord(path, start_frame, end_frame):
+    vr = VideoReader(path)
+    frames = range(start_frame, end_frame + 1)
+    video = vr.get_batch(frames).asnumpy()  # (T, H, W, C)
+    return torch.from_numpy(video).permute(0, 3, 1, 2)
 
 class ClsDataset():
-    def __init__(self, partition, cache_dir, do_aa, predict_per_item, num_classes, **kwargs):
+    def __init__(self, partition, cache_dir, do_aa, predict_per_item, num_classes, prefix, resize_to, **kwargs):
+        self.prefix = prefix
         self.cache_dir = cache_dir
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -30,6 +36,7 @@ class ClsDataset():
         self.dataset_samples = list(cleaned.values[:, 0])
         self.label_array = list(cleaned.values[:, 1])
 
+        self.resize = torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
         self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         self.scale = 0.00392156862745098
 
@@ -47,13 +54,26 @@ class ClsDataset():
 
     def get_video(self, i):
         sample = self.dataset_samples[i]
-        pth = os.path.join(self.cache_dir, 'data', sample)
-        return load_tsr(pth), sample
+        # get file name and start + end frames 
+        # read from the middle with decord?
+        match = re.search(r"([^/]+)_from_(\d+)_to_(\d+)", sample)
+        fn = match.group(1)
+        start = int(match.group(2))
+        end = int(match.group(3))
+        pth = os.path.join(self.prefix, fn + '.mp4')
+        # print(fn, start, end)
+        return read_range_video_decord(pth, start, end), sample
+
+
+
+        # pth = os.path.join(self.cache_dir, 'data', sample)
+        # return load_tsr(pth), sample
 
 
     def __getitem__(self, index):
         video, name = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
+        video = self.resize(video)
         outputs = self.norm(video * self.scale)
         label = self.label_array[index]
         label = self.proc_target(label)

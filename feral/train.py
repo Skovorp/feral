@@ -48,6 +48,8 @@ def main(config_path):
 
     train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
+    print(train_dataset[0])
+    
     val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
 

@@ -1,10 +1,10 @@
-run_name: ahen_ants
+run_name: speedtest_calms_orig_size
 model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
 predict_per_item: 16
 data:
-  prefix: "/mnt/aperto/peter/feral_data/ants_dominic/raw_videos"
-  label_json: "/mnt/aperto/peter/feral_data/ants_dominic/ant_all_labels.json"
-  cache_dir: "/mnt/aperto/peter/feral_data/ants_dominic/cache_256"
+  prefix: "/mnt/aperto/peter/feral_data/calms/reencoded_orig_size"
+  label_json: "/mnt/aperto/peter/feral_data/calms/calms_labels.json"
+  cache_dir: "/mnt/aperto/peter/feral_data/calms/cache256"
   chunk_length: 16
   chunk_shift: 8
   resize_to: 256
@@ -16,7 +16,7 @@ training:
   val_bs: 32
   num_workers: 10
   warmup_epochs: 2
-  lr: 1.0e-4
+  lr: 4.0e-5
   weight_decay: 0.1
 mixup_alpha: 0.8
 ema_decay: 0.999

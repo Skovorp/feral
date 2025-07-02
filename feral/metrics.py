@@ -4,13 +4,12 @@ from sklearn.metrics import roc_auc_score, average_precision_score, precision_re
 import re
 
 
-def calc_frame_level_map(ans, is_frame_level, class_names, full_labels, partition):
+def calc_frame_level_map(ans, is_frame_level, class_names, labels_json, partition):
     logits = {}
     all_data = {}
 
-    for k, v in full_labels.items():
-        if v['partition'] == partition:
-            all_data[k] = v['frame_labels']
+    for fn in labels_json['splits'][partition]:
+        all_data[fn] = labels_json['labels'][fn]
 
     # only works with 16 frame chunks!
     if is_frame_level:
@@ -56,7 +55,11 @@ def calc_frame_level_map(ans, is_frame_level, class_names, full_labels, partitio
     aps = []
     res = {}
     for cls_ind, cls_name in class_names.items():
-        ap = average_precision_score(targets == cls_ind, preds[:, cls_ind])
+        if len(targets.shape) == 1:
+            is_positive = (targets == cls_ind)
+        else:
+            is_positive = targets[:, cls_ind]
+        ap = average_precision_score(is_positive, preds[:, cls_ind])
         if cls_name != 'other':
             aps.append(ap)
         res[f'ap_{cls_name}'] = ap 

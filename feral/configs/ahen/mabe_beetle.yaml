@@ -1,15 +1,13 @@
-run_name: ahen_calms
+run_name: mabe_beetle_same_loss
 model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
 predict_per_item: 16
 data:
-  prefix: "/mnt/aperto/peter/feral_data/calms/all_raw"
-  label_json: "/mnt/aperto/peter/feral_data/calms/calms_labels.json"
-  cache_dir: "/mnt/aperto/peter/feral_data/calms/cache256"
+  prefix: "/mnt/aperto/peter/feral_data/mabe_beetle/reencoded"
+  label_json: "/mnt/aperto/peter/feral_data/mabe_beetle/fix_mabe_beetle_labels.json"
   chunk_length: 16
   chunk_shift: 8
   resize_to: 256
   do_aa: true
-  preproc_processes: 10
 training:
   epochs: 10
   train_bs: 16

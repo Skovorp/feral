@@ -1,16 +1,22 @@
 import os
 import subprocess
 from multiprocessing import Pool
+import mimetypes
 
-input_dir = "/mnt/aperto/peter/feral_data/calms/all_raw"
-output_dir = "/mnt/aperto/peter/feral_data/calms/reencoded_512_sleap"
+input_dir = "/mnt/aperto/peter/feral_data/ants_dominic/raw_videos"
+output_dir = "/mnt/aperto/peter/feral_data/ants_dominic/reencoded"
 os.makedirs(output_dir, exist_ok=True)
 
+def is_video_file(filepath):
+    mime_type, _ = mimetypes.guess_type(filepath)
+    return mime_type is not None and mime_type.startswith('video')
+
 def process_file(filename):
-    if not filename.endswith(".mp4"):
-        return
     input_path = os.path.join(input_dir, filename)
+    assert is_video_file(input_path), f"this is not a video: {input_path}"
+    filename = os.path.splitext(filename)[0] + '.mp4'
     output_path = os.path.join(output_dir, filename)
+
     cmd = [
         "ffmpeg", "-i", input_path,
         "-vf", "scale=512:512:flags=lanczos",
@@ -25,5 +31,5 @@ def process_file(filename):
 
 if __name__ == "__main__":
     files = os.listdir(input_dir)
-    with Pool(processes=16) as pool:  # adjust number of processes as needed
+    with Pool(processes=16) as pool:
         pool.map(process_file, files)

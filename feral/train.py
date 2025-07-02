@@ -1,5 +1,5 @@
 from model import HFModel
-from new_dataset import ClsDataset, collate_fn_val
+from new_new_dataset import ClsDataset, collate_fn_val
 import yaml
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -18,6 +18,14 @@ from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 import sys
 import os
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="No positive class found in y_true, recall is set to one for all thresholds.",
+    category=UserWarning,
+    module="sklearn.metrics._ranking"
+)
 
 torch.backends.cuda.enable_math_sdp(False)
 torch.backends.cuda.enable_mem_efficient_sdp(False)
@@ -29,7 +37,6 @@ def main(config_path):
     with open(cfg['data']['label_json'], 'r') as f:
         labels_json = json.load(f)
     class_names = {int(x): y for x, y in labels_json['class_names'].items()}
-    full_labels = labels_json['labels']
     num_classes = len(class_names)
 
     os.makedirs("answers", exist_ok=True)
@@ -48,8 +55,6 @@ def main(config_path):
 
     train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
-    print(train_dataset[0])
-    
     val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
 
@@ -59,7 +64,7 @@ def main(config_path):
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
 
-    device = torch.device('cuda')
+    device = torch.device('cuda:2')
 
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'])
     model.to(device)
@@ -162,9 +167,9 @@ def main(config_path):
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'val'),
             **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
-            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, class_names, full_labels, 'val'),
+            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
-            'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, full_labels, 'val'),
+            'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
             'ema_val_loss': sum(losses_ema) / len(losses_ema),
         }
         print(logs)

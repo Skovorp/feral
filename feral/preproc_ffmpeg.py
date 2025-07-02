@@ -3,7 +3,7 @@ import subprocess
 from multiprocessing import Pool
 
 input_dir = "/mnt/aperto/peter/feral_data/calms/all_raw"
-output_dir = "/mnt/aperto/peter/feral_data/calms/reencoded_orig_size"
+output_dir = "/mnt/aperto/peter/feral_data/calms/reencoded_512_sleap"
 os.makedirs(output_dir, exist_ok=True)
 
 def process_file(filename):
@@ -13,11 +13,11 @@ def process_file(filename):
     output_path = os.path.join(output_dir, filename)
     cmd = [
         "ffmpeg", "-i", input_path,
-        # "-vf", "scale=256:256:flags=lanczos",
-        "-g", "30",
+        "-vf", "scale=512:512:flags=lanczos",
         "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "slow",
+        "-pix_fmt", "yuv420p",
+        "-crf", "25",
+        "-preset", "superfast",
         "-an",
         output_path
     ]

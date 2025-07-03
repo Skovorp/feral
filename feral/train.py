@@ -64,7 +64,7 @@ def main(config_path):
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
 
-    device = torch.device('cuda:2')
+    device = torch.device(cfg.get('device', 'cuda'))
 
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'])
     model.to(device)
@@ -76,7 +76,7 @@ def main(config_path):
     model_ema = ModelEma(
         model,
         decay=cfg['ema_decay'],
-        device='cuda'
+        device=cfg.get('device', 'cuda')
     )
 
     tot = 0

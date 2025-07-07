@@ -5,7 +5,7 @@ import os
 import decord
 from decord import VideoReader, cpu
 import torch
-from torchvision.transforms.v2 import AutoAugment
+from torchvision.transforms.v2 import AutoAugment, TrivialAugmentWide
 from torch.nn.functional import one_hot
 import numpy as np
 from safetensors import safe_open
@@ -47,7 +47,7 @@ class ClsDataset():
         self.num_classes = num_classes
         self.parse_json(label_json, chunk_shift, chunk_length)
         if do_aa:
-            self.aug = AutoAugment()
+            self.aug = TrivialAugmentWide() #AutoAugment()
         else:
              self.aug = None
         

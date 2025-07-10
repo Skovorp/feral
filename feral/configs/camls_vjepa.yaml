@@ -6,7 +6,7 @@ model:
   drop_path: 0
   head_drop_path: 0
   freeze_layers: 0
-  freeze_embeddings: true
+  freeze_embeddings: false
   backbone_dropout: 0
   class_weights: inv_freq_sqrt
 data:
@@ -18,7 +18,7 @@ data:
   do_aa: true
 training:
   epochs: 10
-  train_bs: 16
+  train_bs: 4
   val_bs: 32
   num_workers: 10
   warmup_epochs: 2

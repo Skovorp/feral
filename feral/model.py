@@ -72,9 +72,9 @@ class HFModel(nn.Module):
         self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
         self.head = nn.Linear(backbone_dim, num_classes)
 
-        self.freeze_model(freeze_layers, freeze_embeddings)
-        if backbone_dropout > 0:
-            inject_dropout(self.model, backbone_dropout)
+        # self.freeze_model(freeze_layers, freeze_embeddings)
+        # if backbone_dropout > 0:
+        #     inject_dropout(self.model, backbone_dropout)
 
     def get_backbone_outp_dim(self):
         x = torch.zeros((1, 64, 3, 512, 512))

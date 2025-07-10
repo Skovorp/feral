@@ -45,6 +45,10 @@ class ClsDataset():
         self.partition = partition
         self.predict_per_item = predict_per_item
         self.num_classes = num_classes
+        
+        with open(label_json, 'r') as f:
+            self.json_data = json.load(f)
+        
         self.parse_json(label_json, chunk_shift, chunk_length)
         if do_aa:
             self.aug = TrivialAugmentWide() #AutoAugment()
@@ -52,17 +56,15 @@ class ClsDataset():
              self.aug = None
         
         self.resize = torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
-        self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        # self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # smolvm
+        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
         self.scale = 0.00392156862745098
 
     def parse_json(self, label_json, chunk_shift, chunk_length):
-        with open(label_json, 'r') as f:
-            data = json.load(f)
-        
         self.samples = []
         self.labels = []
 
-        for fn in data['splits'][self.partition]:
+        for fn in self.json_data['splits'][self.partition]:
             frame_ids = get_frame_ids(
                 get_frame_count(os.path.join(self.prefix, fn)), chunk_shift, chunk_length
             )
@@ -71,7 +73,7 @@ class ClsDataset():
                 end_frame = max(frames)
                 self.samples.append((fn, start_frame, end_frame))
                 self.labels.append(
-                    data['labels'][fn][start_frame: end_frame + 1]
+                    self.json_data['labels'][fn][start_frame: end_frame + 1]
                 )
 
     def proc_target(self, target):
@@ -117,7 +119,16 @@ def collate_fn_val(batch):
 
 if __name__ == "__main__":
     import yaml
-    with open('configs/ahen/mabe_beetle.yaml', 'r') as f:
+    with open('configs/ahen/mosquitos.yaml', 'r') as f:
         cfg = yaml.safe_load(f)
-    ds = ClsDataset(partition='train', predict_per_item=16, num_classes=3, **cfg['data'])
-    print(ds[0])
+    ds = ClsDataset(partition='train', predict_per_item=16, num_classes=7, **cfg['data'])
+    # print(set([len(x) for x in ds.labels]))
+    # for i in range(len(ds)):
+    #     if len(ds.labels[i]) == 15:
+    #         print(i, ds.samples[i], get_frame_count(os.path.join(ds.prefix, ds.samples[i][0])), len(ds.h['labels'][ds.samples[i][0]]))
+
+    for el in ds.h['labels'].keys():
+        a = get_frame_count(os.path.join(ds.prefix, el))
+        b = len(ds.h['labels'][el])
+        if a != b:
+            print(f"{el} true: {a}, json: {b}")

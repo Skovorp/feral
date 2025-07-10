@@ -13,7 +13,7 @@ import numpy as np
 import random
 
 from metrics import calculate_multiclass_metrics, calc_frame_level_map
-from utils import prep_for_answers
+from utils import prep_for_answers, get_weights
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 import sys
@@ -66,26 +66,27 @@ def main(config_path):
 
     device = torch.device(cfg.get('device', 'cuda'))
 
-    model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'])
+    model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     model.to(device)
-    
-    model = torch.compile(model, mode="max-autotune")
 
-    model.train()
+    # model = torch.compile(model, mode="max-autotune")
 
-    model_ema = ModelEma(
-        model,
-        decay=cfg['ema_decay'],
-        device=cfg.get('device', 'cuda')
-    )
+    if cfg['ema_decay'] is not None:
+        model_ema = ModelEma(
+            model,
+            decay=cfg['ema_decay'],
+            device=cfg.get('device', 'cuda')
+        )
+    else:
+        model_ema = None
 
     tot = 0
     for el in model.state_dict().values():
         tot += el.numel()
     print(f"parameters: {tot:_d}")
 
-    criterion = torch.nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=cfg['training']['lr'], weight_decay=cfg['training']['weight_decay'])
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['weight_decay'], weight=get_weights(train_dataset.json_data, cfg['model']['class_weights'], device))
+    optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg['training']['lr'], weight_decay=cfg['training']['weight_decay'])
 
     total_steps = len(train_loader) * cfg['training']['epochs']
     warmup_steps = len(train_loader) * cfg['training']['warmup_epochs']
@@ -123,7 +124,8 @@ def main(config_path):
             loss.backward()
             optimizer.step()
             lr_scheduler.step()
-            model_ema.update(model)
+            if model_ema is not None:
+                model_ema.update(model)
             wandb.log({
                 'batch_loss': loss.item(), 
                 'lr': lr_scheduler.get_last_lr()[0]
@@ -156,22 +158,27 @@ def main(config_path):
                     answers.extend(prep_for_answers(output, target, names))
                     losses.append(loss.item())
 
-                    output_ema = model_ema.ema(data)
-                    loss_ema = criterion(output_ema, target)
-                    answers_ema.extend(prep_for_answers(output_ema, target, names))
-                    losses_ema.append(loss.item())
+                    if model_ema is not None:
+                        output_ema = model_ema.ema(data)
+                        loss_ema = criterion(output_ema, target)
+                        answers_ema.extend(prep_for_answers(output_ema, target, names))
+                        losses_ema.append(loss_ema.item())
                     if cfg['run_name'] == 'debug':
                         break
         with open(os.path.join("answers", f"{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"), 'w') as f:
             json.dump(answers, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'val'),
-            **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
             'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
-            'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
-            'ema_val_loss': sum(losses_ema) / len(losses_ema),
         }
+        if model_ema is not None:
+            ema_logs = {
+                **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
+                'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
+                'ema_val_loss': sum(losses_ema) / len(losses_ema),
+            }
+            logs.update(ema_logs)
         print(logs)
         wandb.log(logs)
 

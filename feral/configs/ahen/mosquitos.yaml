@@ -1,4 +1,4 @@
-run_name: calms_again
+run_name: mosquitos
 model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
 predict_per_item: 16
 model:
@@ -8,10 +8,10 @@ model:
   freeze_layers: 0
   freeze_embeddings: true
   backbone_dropout: 0
-  class_weights: inv_freq_sqrt
+  class_weights: 
 data:
-  prefix: "/mnt/aperto/peter/feral_data/calms/reencoded"
-  label_json: "/mnt/aperto/peter/feral_data/calms/new_calms_labels.json"
+  prefix: "/mnt/aperto/peter/feral_data/mosquitos/reencoded"
+  label_json: "/mnt/aperto/peter/feral_data/mosquitos/behavioral_labels_new.json"
   chunk_length: 16
   chunk_shift: 8
   resize_to: 256
@@ -28,4 +28,4 @@ training:
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0
-device: "cuda:2"
+device: "cuda:1"

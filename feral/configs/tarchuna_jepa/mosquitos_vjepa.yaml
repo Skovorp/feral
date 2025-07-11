@@ -1,0 +1,31 @@
+run_name: mosquitos
+model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
+predict_per_item: 64
+model:
+  fc_drop_rate: 0.5
+  drop_path: 0
+  head_drop_path: 0
+  freeze_layers: 0
+  freeze_embeddings: false
+  backbone_dropout: 0
+  class_weights: inv_freq_sqrt
+data:
+  prefix: "/home/petr/home_datasets/reencoded_mosquitos"
+  label_json: "/home/petr/home_datasets/all_configs/mosquitos_behavioral_labels_new.json"
+  chunk_length: 64
+  chunk_shift: 32
+  resize_to: 256
+  do_aa: true
+training:
+  epochs: 10
+  train_bs: 4
+  val_bs: 8
+  num_workers: 16
+  warmup_epochs: 2
+  lr: 4.0e-5
+  weight_decay: 0.1
+  label_smoothing: 0.2
+mixup_alpha: 0.8
+ema_decay: 0.999
+seed: 0
+device: "cuda"

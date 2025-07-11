@@ -12,7 +12,7 @@ import datetime
 import numpy as np 
 import random
 
-from metrics import calculate_multiclass_metrics, calc_frame_level_map
+from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot
 from utils import prep_for_answers, get_weights
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
@@ -69,7 +69,7 @@ def main(config_path):
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     model.to(device)
 
-    # model = torch.compile(model, mode="max-autotune")
+    model = torch.compile(model, mode="max-autotune")
 
     if cfg['ema_decay'] is not None:
         model_ema = ModelEma(
@@ -169,14 +169,16 @@ def main(config_path):
             json.dump(answers, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'val'),
-            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
+            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'], labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
+            'val_raster_plot': wandb.Image(generate_raster_plot(answers, cfg['predict_per_item'], labels_json, 'val'))
         }
         if model_ema is not None:
             ema_logs = {
                 **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
-                'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'] > 1, class_names, labels_json, 'val'),
+                'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'], labels_json, 'val'),
                 'ema_val_loss': sum(losses_ema) / len(losses_ema),
+                'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, cfg['predict_per_item'], labels_json, 'val'))
             }
             logs.update(ema_logs)
         print(logs)

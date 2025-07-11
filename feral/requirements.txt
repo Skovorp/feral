@@ -6,3 +6,4 @@ wandb
 timm
 hf_xet
 opencv-python
+matplotlib

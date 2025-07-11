@@ -3,8 +3,8 @@ import subprocess
 from multiprocessing import Pool
 import mimetypes
 
-input_dir = "/mnt/aperto/peter/feral_data/ants_dominic/raw_videos"
-output_dir = "/mnt/aperto/peter/feral_data/ants_dominic/reencoded"
+input_dir = "/data/petr/caltech_mice/task1_videos_mp4/all"
+output_dir = "/data/petr/caltech_mice/reencoded"
 os.makedirs(output_dir, exist_ok=True)
 
 def is_video_file(filepath):

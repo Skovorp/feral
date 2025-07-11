@@ -1,9 +1,17 @@
-run_name: debug
+run_name: ants_inv_freq_sqrt
 model_name: "HuggingFaceTB/SmolVLM2-500M-Instruct"
 predict_per_item: 16
+model:
+  fc_drop_rate: 0.5
+  drop_path: 0
+  head_drop_path: 0
+  freeze_layers: 0
+  freeze_embeddings: true
+  backbone_dropout: 0
+  class_weights: inv_freq_sqrt
 data:
-  prefix: "/mnt/aperto/peter/feral_data/ants_dominic/raw_videos"
-  label_json: "/mnt/aperto/peter/feral_data/calms/new_ant_labels.json"
+  prefix: "/mnt/aperto/peter/feral_data/ants_dominic/reencoded"
+  label_json: "/mnt/aperto/peter/feral_data/ants_dominic/new_ant_labels.json"
   chunk_length: 16
   chunk_shift: 8
   resize_to: 256
@@ -14,8 +22,10 @@ training:
   val_bs: 32
   num_workers: 10
   warmup_epochs: 2
-  lr: 1.0e-4
+  lr: 4.0e-5
   weight_decay: 0.1
+  label_smoothing: 0.2
 mixup_alpha: 0.8
-ema_decay: 0.999
+ema_decay: null
 seed: 0
+device: "cuda:3"

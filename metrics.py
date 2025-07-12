@@ -8,6 +8,7 @@ import matplotlib.patches as mpatches
 import json
 import matplotlib.cm as cm
 import PIL
+import cv2
 
 
 def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
@@ -185,3 +186,85 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
         res[f'{prefix}_ap_{cls_name}'] = ap 
     res[f'{prefix}_map'] = sum(aps) / len(aps)
     return res
+
+
+def generate_video_mismatches(ans, predict_per_item, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    logits = {}
+    for k in labels_json['splits'][partition]:
+        logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
+    logits = ensemble_predictions(ans, predict_per_item, logits)
+
+    rel_frames = {}
+
+    for k in logits.keys():
+        errors = (logits[k].argmax(1) != labels_json['labels'][k]) * 1
+        w = np.ones(2 * look_around + 1)
+        rel_frames[k] = np.convolve(errors, w, 'same') > 0
+    
+    outp_buffer = []
+    frame_size = None
+    fps = 30  # default fps
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+
+    for fn in rel_frames:
+        video_path = os.path.join(prefix, fn)
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"Could not open {video_path}")
+            continue
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_size = (width, height)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+
+        font_scale = height / 1000
+        font_thickness = max(1, int(height / 500))
+
+        frame_flags = rel_frames[fn]
+        frame_flags = frame_flags[:total_frames]
+
+        for i in range(total_frames):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_flags[i]:
+                pred = logits[fn][i].argmax()
+                true = labels_json['labels'][fn][i]
+                truncated_fn = fn if len(fn) <= 48 else fn[:45] + "..."
+                text_topleft = f"{truncated_fn} {i}"
+                text_topright = f"Label: {class_names[true]}  Pred: {class_names[pred]}"
+
+                # Draw top-left
+                cv2.putText(frame, text_topleft, (10, 20), font, font_scale, font_color, font_thickness, cv2.LINE_AA)
+
+                # Draw true/pred top-right
+                (text_width, _), _ = cv2.getTextSize(text_topright, font, font_scale, font_thickness)
+                x_right = width - text_width - 10
+                y = 40
+                cv2.putText(frame, text_topright, (x_right, y), font, font_scale, font_color, font_thickness, cv2.LINE_AA)
+                
+                # Draw logits with class names underneath
+                y += 20  # move down from the "True/Pred" line
+                for idx, logit_val in enumerate(logits[fn][i]):
+                    class_name = class_names[idx]
+                    logit_line = f"{class_name}: {logit_val:.2f}"
+                    (text_width, _), _ = cv2.getTextSize(logit_line, font, font_scale, font_thickness)
+                    x_right = width - text_width - 10
+                    cv2.putText(frame, logit_line, (x_right, y), font, font_scale, font_color, font_thickness, cv2.LINE_AA)
+                    y += 15  # adjust spacing between lines
+
+                outp_buffer.append(frame)
+
+
+        cap.release()
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
+    for frame in outp_buffer:
+        out.write(frame)
+    out.release()

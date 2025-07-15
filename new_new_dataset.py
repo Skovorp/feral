@@ -12,6 +12,7 @@ from safetensors import safe_open
 import re
 import cv2
 import json
+import traceback
 
 def read_range_video_decord(path, start_frame, end_frame):
     vr = VideoReader(path)
@@ -92,8 +93,8 @@ class ClsDataset():
         fn, start, end = self.samples[i]
         pth = os.path.join(self.prefix, fn)
         return read_range_video_decord(pth, start, end), f"{fn}_from_{start}_to_{end}"
-
-    def __getitem__(self, index):
+    
+    def get_item_simple(self, index):
         video, name = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
         video = self.resize(video)
@@ -104,7 +105,20 @@ class ClsDataset():
             return outputs, label
         else:
             return outputs, label, self.proc_names(name)
-    
+
+    def __getitem__(self, index):
+        try:
+            return self.get_item_simple(index)
+        except Exception:
+            print(f"Error loading index {index}:\n{traceback.format_exc()}")
+            for _ in range(3):
+                alt_index = np.random.randint(0, len(self))
+                try:
+                    return self.get_item_simple(alt_index)
+                except Exception:
+                    print(f"Error loading index {alt_index}:\n{traceback.format_exc()}")
+            raise RuntimeError(f"Failed to load sample after multiple retries.\nLast error:\n{traceback.format_exc()}")
+
     
     def __len__(self):
         return len(self.samples)

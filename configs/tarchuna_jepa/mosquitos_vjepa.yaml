@@ -1,4 +1,4 @@
-run_name: mosquitos
+run_name: mosquitos_contact_mating_together_fix
 model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
@@ -11,7 +11,7 @@ model:
   class_weights: inv_freq_sqrt
 data:
   prefix: "/home/petr/home_datasets/reencoded_mosquitos"
-  label_json: "/home/petr/home_datasets/all_configs/mosquitos_behavioral_labels_new.json"
+  label_json: "/home/petr/home_datasets/all_configs/mosquitos_contact_and_mating_lump.json"
   chunk_length: 64
   chunk_shift: 32
   resize_to: 256

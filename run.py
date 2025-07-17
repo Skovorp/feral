@@ -4,7 +4,7 @@ import sys
 import os
 
 if __name__ == '__main__':
-    assert len(sys.argv) == 3, "Usage: python train.py <prefix_path> <label_json_path>"
+    assert len(sys.argv) == 3, "Usage: python run.py <prefix_path> <label_json_path>"
 
     prefix_path = sys.argv[1]
     label_json_path = sys.argv[2]

@@ -44,7 +44,8 @@ def main(cfg):
     torch.backends.cudnn.benchmark = True
 
     wandb.init(
-        project="Veles",
+        entity=cfg['wandb']['entity'],
+        project=cfg['wandb']['project'],
         name=cfg['run_name'],
         config=cfg,
         mode='disabled' if cfg['run_name'] == 'debug' else 'online'

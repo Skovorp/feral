@@ -1,5 +1,5 @@
 from model import HFModel
-from dataset import ClsDataset, collate_fn_val
+from dataset import ClsDataset, collate_fn_val, collate_fn_inference
 import yaml
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -65,7 +65,7 @@ def main(cfg):
         inference_dataset = ClsDataset(partition='inference', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         inference_loader = DataLoader(inference_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
-                            batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+                            batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_inference)
     else:
         inference_loader = None
 
@@ -196,7 +196,7 @@ def main(cfg):
     if inference_loader is not None:
         print("Running inference...")
         with torch.no_grad():
-            for data, _, names in tqdm(inference_loader, total=len(val_loader)):
+            for data, names in tqdm(inference_loader, total=len(val_loader)):
                 data = data.to(device)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = model(data)
@@ -205,7 +205,7 @@ def main(cfg):
                         output_ema = model_ema.ema(data)
                         answers_ema.extend(prep_for_answers(output_ema, None, names))
         out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-        save_inference_results(answers, answers_ema, predict_per_item, labels_json, out_pth)
+        save_inference_results(answers, answers_ema, cfg['predict_per_item'], labels_json, out_pth)
        
 
 if __name__ == '__main__':

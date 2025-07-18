@@ -69,9 +69,10 @@ class ClsDataset():
                 start_frame = min(frames)
                 end_frame = max(frames)
                 self.samples.append((fn, start_frame, end_frame))
-                self.labels.append(
-                    self.json_data['labels'][fn][start_frame: end_frame + 1]
-                )
+                if self.partition != 'inference':
+                    self.labels.append(
+                        self.json_data['labels'][fn][start_frame: end_frame + 1]
+                    )
 
     def proc_target(self, target):
         target = torch.tensor(target).long()
@@ -95,12 +96,15 @@ class ClsDataset():
         video = video if self.aug is None else self.aug(video)
         video = self.resize(video)
         outputs = self.norm(video * self.scale)
-        label = self.labels[index]
-        label = self.proc_target(label)
+        if self.partition != "inference":
+            label = self.labels[index]
+            label = self.proc_target(label)
         if self.partition == 'train':
             return outputs, label
-        else:
+        elif self.partition == "val":
             return outputs, label, self.proc_names(name)
+        else:
+            return outputs, self.proc_names(name)
 
     def __getitem__(self, index):
         try:
@@ -125,6 +129,11 @@ def collate_fn_val(batch):
     tensors = torch.stack(tensors)
     targets = torch.stack(targets)
     return tensors, targets, names
+
+def collate_fn_inference(batch):
+    tensors, names = zip(*batch)
+    tensors = torch.stack(tensors)
+    return tensors, names
 
 
 if __name__ == "__main__":

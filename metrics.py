@@ -14,9 +14,7 @@ import cv2
 def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
-    logits = {}
-    for k in labels_json['splits'][partition]:
-        logits[k] = np.zeros((len(labels_json['labels'][k]), len(class_names)))
+    logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, predict_per_item, logits)
 
     preds = []
@@ -74,11 +72,14 @@ def ensemble_predictions(ans, predict_per_item, logits):
             logits[fn][start : end + 1, :] += preds[None, :] * window
     return logits
 
-
-def generate_raster_plot(ans, predict_per_item, labels_json, partition):
+def generate_empty_logits(labels_json, partition):
     logits = {}
     for k in labels_json['splits'][partition]:
         logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
+    return logits
+
+def generate_raster_plot(ans, predict_per_item, labels_json, partition):
+    logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, predict_per_item, logits)
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     all_data = {fn: labels_json['labels'][fn] for fn in labels_json['splits'][partition]}
@@ -190,9 +191,7 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
 
 def generate_video_mismatches(ans, predict_per_item, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
-    logits = {}
-    for k in labels_json['splits'][partition]:
-        logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
+    logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, predict_per_item, logits)
 
     rel_frames = {}

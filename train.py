@@ -1,5 +1,5 @@
 from model import HFModel
-from new_new_dataset import ClsDataset, collate_fn_val
+from dataset import ClsDataset, collate_fn_val
 import yaml
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -13,7 +13,7 @@ import numpy as np
 import random
 
 from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot
-from utils import prep_for_answers, get_weights
+from utils import prep_for_answers, get_weights, save_inference_results
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 import sys
@@ -60,6 +60,14 @@ def main(cfg):
                             batch_size=cfg['training']['train_bs'], num_workers=cfg['training']['num_workers'])
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+    
+    if 'inference' in labels_json['splits']:
+        inference_dataset = ClsDataset(partition='inference', model_name=cfg['model_name'], 
+                            num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
+        inference_loader = DataLoader(inference_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
+                            batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+    else:
+        inference_loader = None
 
     device = torch.device(cfg.get('device', 'cuda'))
 
@@ -180,6 +188,25 @@ def main(cfg):
             logs.update(ema_logs)
         print(logs)
         wandb.log(logs)
+    
+    model.eval()
+    answers = []
+    answers_ema = []
+    print("Finished training")
+    if inference_loader is not None:
+        print("Running inference...")
+        with torch.no_grad():
+            for data, _, names in tqdm(inference_loader, total=len(val_loader)):
+                data = data.to(device)
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    output = model(data)
+                    answers.extend(prep_for_answers(output, None, names))
+                    if model_ema is not None:
+                        output_ema = model_ema.ema(data)
+                        answers_ema.extend(prep_for_answers(output_ema, None, names))
+        out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+        save_inference_results(answers, answers_ema, predict_per_item, labels_json, out_pth)
+       
 
 if __name__ == '__main__':
     assert len(sys.argv) > 1 and len(sys.argv[1]) > 0, "Usage: python train.py <path_to_config.yaml>"

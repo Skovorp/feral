@@ -33,10 +33,6 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length):
         return vid_frames
 
 def get_frame_count(video_path):
-    # cap = cv2.VideoCapture(video_path)
-    # frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    # cap.release()
-    # return frame_count
     vr = VideoReader(video_path)
     return len(vr)
 
@@ -50,8 +46,8 @@ class ClsDataset():
         with open(label_json, 'r') as f:
             self.json_data = json.load(f)
         
-        self.parse_json(label_json, chunk_shift, chunk_length)
-        if do_aa:
+        self.parse_json(chunk_shift, chunk_length)
+        if do_aa and self.partition == "train":
             self.aug = TrivialAugmentWide() #AutoAugment()
         else:
              self.aug = None
@@ -61,7 +57,7 @@ class ClsDataset():
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
         self.scale = 0.00392156862745098
 
-    def parse_json(self, label_json, chunk_shift, chunk_length):
+    def parse_json(self, chunk_shift, chunk_length):
         self.samples = []
         self.labels = []
 

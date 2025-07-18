@@ -75,7 +75,8 @@ def main(cfg):
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     model.to(device)
 
-    model = torch.compile(model, mode="max-autotune")
+    if cfg['training']['compile']:
+        model = torch.compile(model, mode="max-autotune")
 
     if cfg['ema_decay'] is not None:
         model_ema = ModelEma(

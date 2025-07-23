@@ -5,6 +5,8 @@ import os
 import wandb
 from urllib.parse import urlparse
 
+from utils import get_random_run_name
+
 if __name__ == '__main__':
     assert len(sys.argv) == 3, "Usage: python run.py <path_to_video_folder> <label_json_path>"
 
@@ -19,8 +21,8 @@ if __name__ == '__main__':
 
     cfg['data']['prefix'] = prefix_path
     cfg['data']['label_json'] = label_json_path
-    
-    ## help me polish code below
+    cfg['run_name'] = get_random_run_name()
+
     res = input('\nDo you want logs for your run to be on a community Weights & Biases account? No setup required, but everyone will be able to see logs for your run. You can also create your personal project on WandB and log there. Type "open" or "personal": ').strip().lower()
     if res == "open":
         print("Using shared account")

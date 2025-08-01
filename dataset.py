@@ -13,6 +13,7 @@ import re
 import cv2
 import json
 import traceback
+import random
 
 def read_range_video_decord(path, frames):
     vr = VideoReader(path)
@@ -40,7 +41,7 @@ def get_frame_count(video_path):
     return len(vr)
 
 class ClsDataset():
-    def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, **kwargs):
+    def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, part_sample=1.0, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -59,6 +60,17 @@ class ClsDataset():
         # self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # smolvm
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
         self.scale = 0.00392156862745098
+
+        if part_sample < 1.0 and partition == 'train':
+            print(f"Training on {100 * part_sample:.2f}% of chunks")
+            new_len = round(part_sample * len(self.samples))
+            new_indexes = random.sample(list(range(len(self.samples))), new_len)
+            self.samples = [self.samples[i] for i in new_indexes]
+            self.labels = [self.labels[i] for i in new_indexes]
+
+            concat_labels = np.array(self.labels).flatten()
+            print(f"Class counts after sampling: {np.bincount(concat_labels)}")
+
 
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
         self.samples = []

@@ -1,0 +1,40 @@
+run_name: camls_chunk_sample_12
+model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
+predict_per_item: 64
+model:
+  fc_drop_rate: 0.5
+  drop_path: 0
+  head_drop_path: 0
+  freeze_layers: 0
+  freeze_embeddings: false
+  backbone_dropout: 0
+  class_weights: inv_freq_sqrt
+  freeze_predictor_layers: 0
+  freeze_encoder_layers: 0
+data:
+  prefix: "/home/petr/home_datasets/reencoded_calms"
+  label_json: "/data/petr/caltech_mice/new_calms_labels.json"
+  chunk_length: 64
+  chunk_shift: 32
+  chunk_step: 1
+  resize_to: 256
+  do_aa: true
+  part_sample: 0.12
+training:
+  epochs: 10
+  train_bs: 4
+  val_bs: 8
+  num_workers: 16
+  part_warmup: 0.2
+  lr: 4.0e-5
+  weight_decay: 0.1
+  label_smoothing: 0.2
+  compile: true
+mixup_alpha: 0.8
+ema_decay: 0.999
+seed: 0
+device: "cuda"
+wandb:
+  key: dde17687b4b84ba8171dfede64d865243be41a0e
+  entity: sposiboh
+  project: feral_public

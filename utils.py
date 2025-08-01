@@ -1,11 +1,8 @@
 import torch
 import numpy as np
 import json 
-from metrics import generate_empty_logits, ensemble_predictions
 import random
 import os
-
-from dataset import get_frame_count
 
 @torch.no_grad()
 def prep_for_answers(outputs, targets, names=None):
@@ -26,25 +23,6 @@ def prep_for_answers(outputs, targets, names=None):
     else:
         assert len(outputs) == len(targets), f"len(outputs) == len(targets). got {len(outputs)} == {len(targets)}"
         return list(zip(outputs, targets))
-    
-def save_inference_results(ans, ema_ans, video_prefix, predict_per_item, labels_json, save_fn):
-    out = {}
-    
-    ans_logits = {} 
-    for fn in labels_json['splits']['inference']:
-        ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-
-    out['preds'] = ensemble_predictions(ans, predict_per_item, ans_logits)
-    out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
-    
-    if len(ema_ans) > 0:
-        ema_logits = {}
-        for fn in labels_json['splits']['inference']:
-            ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-        out['ema_preds'] = ensemble_predictions(ema_ans, predict_per_item, ema_logits)
-        out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
-    with open(save_fn, 'w') as f:
-        json.dump(out, f)
     
 def get_weights(json_data, weight_type, device):
     assert weight_type in ('inv_freq', 'inv_freq_sqrt', None), "weight_type should be 'inv_freq_sqrt', 'sqrt' or None"
@@ -89,3 +67,40 @@ def get_random_run_name():
         random.choice(cool_animals)
     ])
     
+
+# def last_nonzero_index(arr):
+#     idx = np.arange(len(arr))
+#     nonzero_idx = np.where(arr != 0, idx, -1)
+#     acc = np.maximum.accumulate(nonzero_idx)
+#     acc[acc == -1] = 0
+#     return acc
+
+# def next_nonzero_index(arr):
+#     idx = np.arange(len(arr))
+#     rev_idx = idx[::-1]
+#     rev_arr = arr[::-1]
+#     nonzero_rev = np.where(rev_arr != 0, rev_idx, -1)
+#     acc = np.maximum.accumulate(nonzero_rev)
+#     acc[acc == -1] = len(arr) - 1
+#     return acc[::-1]
+
+def last_nonzero_index(arr):
+    out = np.empty_like(arr, dtype=int)
+    last_idx = -1
+    for i in range(len(arr)):
+        if arr[i] != 0:
+            last_idx = i
+        out[i] = last_idx
+    return out
+
+def next_nonzero_index(arr):
+    out = np.empty_like(arr, dtype=int)
+    next_idx = -1
+    for i in reversed(range(len(arr))):
+        if arr[i] != 0:
+            next_idx = i
+        out[i] = next_idx
+    return out
+
+if __name__ == "__main__":
+    print(next_nonzero_index([1., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0]))

@@ -1,4 +1,4 @@
-run_name: rerun_ants_vjepa_h100
+run_name: freeze_pred_6
 model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
@@ -9,11 +9,14 @@ model:
   freeze_embeddings: false
   backbone_dropout: 0
   class_weights: inv_freq_sqrt
+  freeze_predictor_layers: 6
+  freeze_encoder_layers: 24
 data:
-  prefix: "/home/petr/home_datasets/reencoded_ants"
-  label_json: "/home/petr/home_datasets/all_configs/new_ant_labels.json"
+  prefix: "/home/petr/home_datasets/reencoded_calms"
+  label_json: "/data/petr/caltech_mice/new_calms_labels.json"
   chunk_length: 64
   chunk_shift: 32
+  chunk_step: 1
   resize_to: 256
   do_aa: true
 training:
@@ -21,7 +24,7 @@ training:
   train_bs: 4
   val_bs: 8
   num_workers: 16
-  warmup_epochs: 2
+  part_warmup: 0.2
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.2

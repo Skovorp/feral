@@ -10,13 +10,16 @@ import matplotlib.cm as cm
 import PIL
 import cv2
 import os
+import traceback
 
+from utils import last_nonzero_index, next_nonzero_index
+from dataset import get_frame_count
 
 def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
     logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, predict_per_item, logits)
+    logits = ensemble_predictions(ans, logits)
 
     preds = []
     targets = []
@@ -41,36 +44,46 @@ def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
     return sum(aps) / len(aps)
 
 
-def ensemble_predictions(ans, predict_per_item, logits):
-    is_frame_level = predict_per_item > 1
-    assert predict_per_item % 2 == 0
+def ensemble_predictions(ans, logits):
+    predict_per_item = max([int(x[0].split('_chunkind_')[1]) for x in ans]) + 1
+    sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
-    if is_frame_level:
-        tmp = np.linspace(0.4, 0.6, predict_per_item // 2)
-        window = np.concatenate([tmp, np.flip(tmp)])[:, None]
-    else:
-        tmp = np.linspace(0, 1, predict_per_item // 2)
-        window = np.concatenate([tmp, np.flip(tmp)])[:, None]
+    # uniform weights for now
+    weights = np.ones(predict_per_item)[:, None]
 
     for el in ans:
         name = el[0]
         preds = np.array(el[1])
-        if is_frame_level:
-            match = re.search(r"([^/]+)_from_(\d+)_to_(\d+)_(\d+)", name)
-            fn = match.group(1)
-            start = int(match.group(2))
-            end = int(match.group(3))
-            frame = int(match.group(4))
-            
-            ind = start + frame
-            logits[fn][ind, :] += preds * window[frame, 0]
-        else:
-            match = re.search(r"([^/]+)_from_(\d+)_to_(\d+)", name)
-            fn = match.group(1)
-            start = int(match.group(2))
-            end = int(match.group(3))
 
-            logits[fn][start : end + 1, :] += preds[None, :] * window
+        # get ind
+        match = re.search(r"([^/]+)_globalind_(\d+)_chunkind_(\d+)", name)
+        fn = match.group(1)
+        global_ind = int(match.group(2))
+        chunk_ind = int(match.group(3))
+
+        logits[fn][global_ind, :] += preds * weights[chunk_ind, 0]
+        sum_weights[fn][global_ind] += weights[chunk_ind, 0]
+    
+    for fn in logits.keys():
+        left_ind = last_nonzero_index(sum_weights[fn])
+        right_ind = next_nonzero_index(sum_weights[fn])
+
+        for i in range(sum_weights[fn].shape[0]):
+            if sum_weights[fn][i] > 0:
+                logits[fn][i, :] = logits[fn][i, :] / sum_weights[fn][i]
+            else:
+                # assert left_ind[i] < i and i < right_ind[i], (left_ind[i], i, right_ind[i], sum_weights[fn][i - 5 : i + 5])
+                if left_ind[i] == -1 and right_ind[i] == -1:
+                    continue
+                elif right_ind[i] == -1:
+                    logits[fn][i, :] = logits[fn][left_ind[i], :]
+                elif left_ind[i] == -1:
+                    logits[fn][i, :] = logits[fn][right_ind[i], :]
+                else:
+                    inv_left_dist  = 1 / (i - left_ind[i])
+                    inv_right_dist = 1 / (right_ind[i] - i)
+                    divisor = 1 if inv_left_dist + inv_right_dist == 0 else inv_left_dist + inv_right_dist
+                    logits[fn][i, :] = (logits[fn][left_ind[i], :] * inv_left_dist + logits[fn][right_ind[i], :] * inv_right_dist) / divisor
     return logits
 
 def generate_empty_logits(labels_json, partition):
@@ -80,89 +93,101 @@ def generate_empty_logits(labels_json, partition):
     return logits
 
 def generate_raster_plot(ans, predict_per_item, labels_json, partition):
-    logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, predict_per_item, logits)
-    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
-    all_data = {fn: labels_json['labels'][fn] for fn in labels_json['splits'][partition]}
+    try:
+        logits = generate_empty_logits(labels_json, partition)
+        logits = ensemble_predictions(ans, logits)
+        class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+        all_data = {fn: labels_json['labels'][fn] for fn in labels_json['splits'][partition]}
 
-    video_names = list(logits.keys())
+        video_names = list(logits.keys())
 
-    preds_list = []
-    targets_list = []
-    split_positions = []
-    start = 0
+        preds_list = []
+        targets_list = []
+        split_positions = []
+        start = 0
 
-    for name in video_names:
-        pred = logits[name].argmax(1)
-        label = np.array(all_data[name])
+        for name in video_names:
+            pred = logits[name].argmax(1)
+            label = np.array(all_data[name])
+            assert len(label.shape) == 1, f"Labels must mutually exclusive for rester plot. Labels must be 1d array, got {label.shape}"
 
-        preds_list.append(pred)
-        targets_list.append(label)
+            preds_list.append(pred)
+            targets_list.append(label)
 
-        start += len(pred)
-        split_positions.append(start)
+            start += len(pred)
+            split_positions.append(start)
 
-    split_positions = split_positions[:-1]
+        split_positions = split_positions[:-1]
 
-    arr_pred = np.concatenate(preds_list)[None, :]
-    arr_label = np.concatenate(targets_list)[None, :]
-    arr_diff = (arr_pred != arr_label).astype(int)
+        arr_pred = np.concatenate(preds_list)[None, :]
+        arr_label = np.concatenate(targets_list)[None, :]
+        arr_diff = (arr_pred != arr_label).astype(int)
 
-    # Prepare colormaps and labels
-    all_classes = sorted(set(np.unique(arr_pred)) | set(np.unique(arr_label)))
-    num_classes = len(all_classes)
-    base_cmap = cm.get_cmap('nipy_spectral')
+        # Prepare colormaps and labels
+        all_classes = sorted(set(np.unique(arr_pred)) | set(np.unique(arr_label)))
+        num_classes = len(all_classes)
+        base_cmap = cm.get_cmap('nipy_spectral')
 
-    # Skip dark colors near 0.0 — start sampling from 0.05 or 0.1
-    color_range = np.linspace(0.1, 1.0, num_classes)
-    colors = [base_cmap(val) for val in color_range]
+        # Skip dark colors near 0.0 — start sampling from 0.05 or 0.1
+        color_range = np.linspace(0.1, 1.0, num_classes)
+        colors = [base_cmap(val) for val in color_range]
 
-    cmap = ListedColormap(colors)
-    diff_cmap = ListedColormap(['white', 'red'])
+        cmap = ListedColormap(colors)
+        diff_cmap = ListedColormap(['white', 'red'])
 
-    labels = ['prediction', 'label', 'mismatch']
-    class_id_to_name = class_names
-    legend_elements = [mpatches.Patch(color=colors[i], label=class_id_to_name[i]) for i in all_classes]
+        labels = ['prediction', 'label', 'mismatch']
+        class_id_to_name = class_names
+        legend_elements = [mpatches.Patch(color=colors[i], label=class_id_to_name[i]) for i in all_classes]
 
-    # Plot
-    fig, axs = plt.subplots(3, 1, figsize=(32, 4), sharex=True)
+        # Plot
+        fig, axs = plt.subplots(3, 1, figsize=(32, 4), sharex=True)
 
-    for i, arr in enumerate([arr_pred, arr_label, arr_diff]):
-        cmap_used = cmap if i < 2 else diff_cmap
-        axs[i].imshow(arr, aspect='auto', cmap=cmap_used, interpolation='nearest')
-        axs[i].set_yticks([0])
-        axs[i].set_yticklabels([labels[i]], fontsize=14, rotation=0, va='center')
-        axs[i].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
-        axs[i].tick_params(axis='y', which='both', left=False)
-        for pos in split_positions:
-            axs[i].axvline(pos, color='black', linewidth=2)
+        for i, arr in enumerate([arr_pred, arr_label, arr_diff]):
+            cmap_used = cmap if i < 2 else diff_cmap
+            axs[i].imshow(arr, aspect='auto', cmap=cmap_used, interpolation='nearest')
+            axs[i].set_yticks([0])
+            axs[i].set_yticklabels([labels[i]], fontsize=14, rotation=0, va='center')
+            axs[i].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            axs[i].tick_params(axis='y', which='both', left=False)
+            for pos in split_positions:
+                axs[i].axvline(pos, color='black', linewidth=2)
 
-    # Add video names centered under each segment
-    start = 0
-    for name in video_names:
-        length = logits[name].shape[0]
-        center = start + length // 2
-        wrapped_name = '\n'.join([name[i:i+15] for i in range(0, len(name), 15)])
-        axs[-1].text(center, 1.2, wrapped_name, ha='center', va='top', fontsize=10)  # Moved up slightly
-        start += length
+        # Add video names centered under each segment
+        start = 0
+        for name in video_names:
+            length = logits[name].shape[0]
+            center = start + length // 2
+            wrapped_name = '\n'.join([name[i:i+15] for i in range(0, len(name), 15)])
+            axs[-1].text(center, 1.2, wrapped_name, ha='center', va='top', fontsize=10)  # Moved up slightly
+            start += length
 
-    # Adjust layout
-    plt.subplots_adjust(left=0.04, right=0.99, bottom=0.45, top=0.95)
+        # Adjust layout
+        plt.subplots_adjust(left=0.04, right=0.99, bottom=0.45, top=0.95)
 
-    # Embedded legend
-    legend_ax = fig.add_axes([0.1, 0.02, 0.8, 0.08])
-    legend_ax.axis('off')
-    legend_ax.legend(
-        handles=legend_elements,
-        loc='center',
-        ncol=min(len(legend_elements), 6),
-        fontsize=14,
-        frameon=False
-    )
+        # Embedded legend
+        legend_ax = fig.add_axes([0.1, 0.02, 0.8, 0.08])
+        legend_ax.axis('off')
+        legend_ax.legend(
+            handles=legend_elements,
+            loc='center',
+            ncol=min(len(legend_elements), 6),
+            fontsize=14,
+            frameon=False
+        )
 
-    res = fig2img(fig)
-    plt.close(fig)
-    return res
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
+    except Exception:
+        traceback.print_exc()
+
+        fig, ax = plt.subplots(figsize=(32, 4))
+        ax.text(0.5, 0.5, 'Error. See logs', fontsize=40, ha='center', va='center', color='red')
+        ax.axis('off')
+        
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
 
 
 def fig2img(fig):
@@ -193,7 +218,7 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
 def generate_video_mismatches(ans, predict_per_item, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, predict_per_item, logits)
+    logits = ensemble_predictions(ans, logits)
 
     rel_frames = {}
 
@@ -268,3 +293,23 @@ def generate_video_mismatches(ans, predict_per_item, labels_json, partition, pre
     for frame in outp_buffer:
         out.write(frame)
     out.release()
+
+
+def save_inference_results(ans, ema_ans, video_prefix, predict_per_item, labels_json, save_fn):
+    out = {}
+    
+    ans_logits = {} 
+    for fn in labels_json['splits']['inference']:
+        ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
+
+    out['preds'] = ensemble_predictions(ans, predict_per_item, ans_logits)
+    out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
+    
+    if len(ema_ans) > 0:
+        ema_logits = {}
+        for fn in labels_json['splits']['inference']:
+            ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
+        out['ema_preds'] = ensemble_predictions(ema_ans, predict_per_item, ema_logits)
+        out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
+    with open(save_fn, 'w') as f:
+        json.dump(out, f)

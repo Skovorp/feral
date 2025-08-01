@@ -12,6 +12,7 @@ model:
 data:
   chunk_length: 64
   chunk_shift: 32
+  chunk_skip: 0
   resize_to: 256
   do_aa: true
 training:

@@ -1,4 +1,4 @@
-run_name: rerun_ants_vjepa_h100
+run_name: debug
 model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
@@ -10,10 +10,11 @@ model:
   backbone_dropout: 0
   class_weights: inv_freq_sqrt
 data:
-  prefix: "/home/petr/home_datasets/reencoded_ants"
-  label_json: "/home/petr/home_datasets/all_configs/new_ant_labels.json"
+  prefix: "/home/petr/home_datasets/reencoded_worms"
+  label_json: "/home/petr/home_datasets/all_configs/worm_behavior_dataset.json"
   chunk_length: 64
-  chunk_shift: 32
+  chunk_shift: 192
+  chunk_step: 3
   resize_to: 256
   do_aa: true
 training:
@@ -25,7 +26,7 @@ training:
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.2
-  compile: true
+  compile: false
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0

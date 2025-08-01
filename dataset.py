@@ -14,18 +14,21 @@ import cv2
 import json
 import traceback
 
-def read_range_video_decord(path, start_frame, end_frame):
+def read_range_video_decord(path, frames):
     vr = VideoReader(path)
-    frames = range(start_frame, end_frame + 1)
     video = vr.get_batch(frames).asnumpy()  # (T, H, W, C)
     return torch.from_numpy(video).permute(0, 3, 1, 2)
 
-def get_frame_ids(total_frames, chunk_shift, chunk_length):
+def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
+        # chunk_step = 1 -- pick every frame        XXXX
+        # chunk_step = 2 -- pick every other frame  X_X_X_X
+        # chunk_step = 3 -- pick every third        X__X__X__X
         vid_frames = []
         start_ind = 0
 
         while True:
-            inds = list(range(start_ind, min(start_ind + chunk_length, total_frames)))
+            last_ind = start_ind + (chunk_length - 1) * chunk_step  + 1
+            inds = list(range(start_ind, min(last_ind, total_frames), chunk_step))
             if len(inds) != chunk_length:
                 break
             vid_frames.append(inds)
@@ -37,7 +40,7 @@ def get_frame_count(video_path):
     return len(vr)
 
 class ClsDataset():
-    def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, **kwargs):
+    def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -46,7 +49,7 @@ class ClsDataset():
         with open(label_json, 'r') as f:
             self.json_data = json.load(f)
         
-        self.parse_json(chunk_shift, chunk_length)
+        self.parse_json(chunk_shift, chunk_length, chunk_step)
         if do_aa and self.partition == "train":
             self.aug = TrivialAugmentWide() #AutoAugment()
         else:
@@ -57,21 +60,19 @@ class ClsDataset():
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
         self.scale = 0.00392156862745098
 
-    def parse_json(self, chunk_shift, chunk_length):
+    def parse_json(self, chunk_shift, chunk_length, chunk_step):
         self.samples = []
         self.labels = []
 
         for fn in self.json_data['splits'][self.partition]:
             frame_ids = get_frame_ids(
-                get_frame_count(os.path.join(self.prefix, fn)), chunk_shift, chunk_length
+                get_frame_count(os.path.join(self.prefix, fn)), chunk_shift, chunk_length, chunk_step
             )
             for frames in frame_ids:
-                start_frame = min(frames)
-                end_frame = max(frames)
-                self.samples.append((fn, start_frame, end_frame))
+                self.samples.append((fn, frames))
                 if self.partition != 'inference':
                     self.labels.append(
-                        self.json_data['labels'][fn][start_frame: end_frame + 1]
+                        [self.json_data['labels'][fn][i] for i in frames]
                     )
 
     def proc_target(self, target):
@@ -87,12 +88,12 @@ class ClsDataset():
         return sample
 
     def get_video(self, i):
-        fn, start, end = self.samples[i]
+        fn, frames = self.samples[i]
         pth = os.path.join(self.prefix, fn)
-        return read_range_video_decord(pth, start, end), f"{fn}_from_{start}_to_{end}"
+        return read_range_video_decord(pth, frames), [f"{fn}_globalind_{frames[i]}_chunkind_{i}" for i in range(len(frames))]
     
     def get_item_simple(self, index):
-        video, name = self.get_video(index)
+        video, names = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
         video = self.resize(video)
         outputs = self.norm(video * self.scale)
@@ -102,9 +103,9 @@ class ClsDataset():
         if self.partition == 'train':
             return outputs, label
         elif self.partition == "val":
-            return outputs, label, self.proc_names(name)
+            return outputs, label, names
         else:
-            return outputs, self.proc_names(name)
+            return outputs, names
 
     def __getitem__(self, index):
         try:

@@ -29,3 +29,7 @@ mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0
 device: "cuda"
+wandb:
+  key: dde17687b4b84ba8171dfede64d865243be41a0e
+  entity: sposiboh
+  project: feral_public

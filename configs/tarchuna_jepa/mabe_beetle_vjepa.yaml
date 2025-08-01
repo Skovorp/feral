@@ -1,4 +1,4 @@
-run_name: beetle
+run_name: rerun_beetle
 model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
@@ -25,7 +25,12 @@ training:
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.2
+  compile: true
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0
 device: "cuda"
+wandb:
+  key: dde17687b4b84ba8171dfede64d865243be41a0e
+  entity: sposiboh
+  project: feral_public

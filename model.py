@@ -52,7 +52,8 @@ def inject_dropout(module, p):
             inject_dropout(child, p)
 
 class HFModel(nn.Module):
-    def __init__(self, model_name, num_classes, predict_per_item, fc_drop_rate, freeze_layers, backbone_dropout, head_drop_path, freeze_embeddings, **kwargs):
+    def __init__(self, model_name, num_classes, predict_per_item, fc_drop_rate, freeze_layers, backbone_dropout, head_drop_path, freeze_embeddings, 
+                 freeze_predictor_layers, freeze_encoder_layers, **kwargs):
         super().__init__()
         # self.model = AutoModelForImageTextToText.from_pretrained(
         #     model_name,
@@ -72,7 +73,7 @@ class HFModel(nn.Module):
         self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
         self.head = nn.Linear(backbone_dim, num_classes)
 
-        # self.freeze_model(freeze_layers, freeze_embeddings)
+        self.freeze_model(freeze_predictor_layers, freeze_encoder_layers)
         # if backbone_dropout > 0:
         #     inject_dropout(self.model, backbone_dropout)
 
@@ -81,14 +82,32 @@ class HFModel(nn.Module):
         out = self.model(x).last_hidden_state
         return out.shape[-1]
     
-    def freeze_model(self, k, freeze_embeddings):
-        encoder_layers = self.model.encoder.layers
-        assert k <= len(encoder_layers), f"Only {len(encoder_layers)} layers available, got k={k}"
-        for i in range(k):
+    # def freeze_model(self, k, freeze_embeddings):
+    #     encoder_layers = self.model.encoder.layers
+    #     assert k <= len(encoder_layers), f"Only {len(encoder_layers)} layers available, got k={k}"
+    #     for i in range(k):
+    #         for param in encoder_layers[i].parameters():
+    #             param.requires_grad = False
+    #     if freeze_embeddings:
+    #         for param in self.model.embeddings.parameters():
+    #             param.requires_grad = False
+
+    def freeze_model(self, freeze_predictor_layers: int, freeze_encoder_layers: int):
+        encoder_layers = self.model.encoder.layer
+        assert freeze_encoder_layers <= len(encoder_layers), (
+            f"Only {len(encoder_layers)} encoder layers available, got freeze_encoder_layers={freeze_encoder_layers}"
+        )
+        for i in range(freeze_encoder_layers):
             for param in encoder_layers[i].parameters():
                 param.requires_grad = False
-        if freeze_embeddings:
-            for param in self.model.embeddings.parameters():
+
+        # Freeze predictor layers
+        predictor_layers = self.model.predictor.layer
+        assert freeze_predictor_layers <= len(predictor_layers), (
+            f"Only {len(predictor_layers)} predictor layers available, got freeze_predictor_layers={freeze_predictor_layers}"
+        )
+        for i in range(freeze_predictor_layers):
+            for param in predictor_layers[i].parameters():
                 param.requires_grad = False
 
     def forward(self, x):
@@ -104,9 +123,9 @@ class HFModel(nn.Module):
     
 if __name__ == "__main__":
     import yaml
-    with open('configs/ahen/ants_dominic.yaml', 'r') as f:
+    with open('/home/petr/video_understanding/configs/tarchuna_jepa/camls_vjepa.yaml', 'r') as f:
         cfg = yaml.safe_load(f)
-    mod = HFModel(model_name=cfg['model_name'], num_classes=3, predict_per_item=16, **cfg['model'])
+    mod = HFModel(model_name=cfg['model_name'], num_classes=4, predict_per_item=64, **cfg['model'])
     print(mod.model)
     print("NEED GRAD")
     for name, param in mod.named_parameters():

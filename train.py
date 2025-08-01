@@ -12,8 +12,8 @@ import datetime
 import numpy as np 
 import random
 
-from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot
-from utils import prep_for_answers, get_weights, save_inference_results
+from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results
+from utils import prep_for_answers, get_weights
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 import sys
@@ -96,7 +96,7 @@ def main(cfg):
     optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg['training']['lr'], weight_decay=cfg['training']['weight_decay'])
 
     total_steps = len(train_loader) * cfg['training']['epochs']
-    warmup_steps = len(train_loader) * cfg['training']['warmup_epochs']
+    warmup_steps = round(total_steps * cfg['training']['part_warmup'])
     lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
 

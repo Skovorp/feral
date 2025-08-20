@@ -23,7 +23,7 @@ training:
   train_bs: 4
   val_bs: 8
   num_workers: 4
-  warmup_epochs: 2
+  part_warmup: 0.2
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.2

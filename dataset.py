@@ -87,7 +87,8 @@ class ClsDataset():
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )
-        self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
+        if self.partition != 'inference':
+            self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
 
     def proc_target(self, target):
         target = torch.tensor(target).long()

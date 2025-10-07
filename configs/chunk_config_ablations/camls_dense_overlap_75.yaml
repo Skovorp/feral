@@ -25,7 +25,7 @@ training:
   warmup_epochs: 2
   lr: 4.0e-5
   weight_decay: 0.1
-  label_smoothing: 0.2
+  label_smoothing: 0.1
   compile: true
 mixup_alpha: 0.8
 ema_decay: 0.999

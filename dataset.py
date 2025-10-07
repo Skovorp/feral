@@ -46,6 +46,7 @@ class ClsDataset():
         self.partition = partition
         self.predict_per_item = predict_per_item
         self.num_classes = num_classes
+        self.is_multilabel = None
         
         with open(label_json, 'r') as f:
             self.json_data = json.load(f)
@@ -86,6 +87,7 @@ class ClsDataset():
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )
+        self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
 
     def proc_target(self, target):
         target = torch.tensor(target).long()

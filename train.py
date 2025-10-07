@@ -12,7 +12,7 @@ import datetime
 import numpy as np 
 import random
 
-from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results
+from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
 from utils import prep_for_answers, get_weights
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
@@ -92,7 +92,10 @@ def main(cfg):
         tot += el.numel()
     print(f"parameters: {tot:_d}")
 
-    criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['weight_decay'], weight=get_weights(train_dataset.json_data, cfg['model']['class_weights'], device))
+    if train_dataset.is_multilabel:
+        criterion = torch.nn.BCEWithLogitsLoss()
+    else:
+        criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['label_smoothing'], weight=get_weights(train_dataset.json_data, cfg['model']['class_weights'], device))
     optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg['training']['lr'], weight_decay=cfg['training']['weight_decay'])
 
     total_steps = len(train_loader) * cfg['training']['epochs']
@@ -162,13 +165,15 @@ def main(cfg):
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = model(data)
                     loss = criterion(output, target)
-                    answers.extend(prep_for_answers(output, target, names))
+                    output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    answers.extend(prep_for_answers(output_prob, target, names))
                     losses.append(loss.item())
 
                     if model_ema is not None:
                         output_ema = model_ema.ema(data)
                         loss_ema = criterion(output_ema, target)
-                        answers_ema.extend(prep_for_answers(output_ema, target, names))
+                        output_ema_prob = output_ema if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
+                        answers_ema.extend(prep_for_answers(output_ema_prob, target, names))
                         losses_ema.append(loss_ema.item())
                     if cfg['run_name'] == 'debug':
                         break
@@ -176,6 +181,7 @@ def main(cfg):
             json.dump(answers, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'val'),
+            **calculate_f1_metrics(answers, labels_json, 'val', train_dataset.is_multilabel, 'val'),
             'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'], labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
             'val_raster_plot': wandb.Image(generate_raster_plot(answers, cfg['predict_per_item'], labels_json, 'val'))
@@ -183,6 +189,7 @@ def main(cfg):
         if model_ema is not None:
             ema_logs = {
                 **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
+                 **calculate_f1_metrics(answers_ema, labels_json, 'val', train_dataset.is_multilabel, 'ema_val'),
                 'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'], labels_json, 'val'),
                 'ema_val_loss': sum(losses_ema) / len(losses_ema),
                 'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, cfg['predict_per_item'], labels_json, 'val'))

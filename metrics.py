@@ -1,6 +1,6 @@
 import numpy as np
 import json 
-from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score
 import re
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
@@ -43,6 +43,49 @@ def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
         res[f'ap_{cls_name}'] = ap 
     return sum(aps) / len(aps)
 
+def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
+
+    logits = generate_empty_logits(labels_json, partition)
+    logits = ensemble_predictions(ans, logits)
+
+    preds = []
+    targets = []
+    for fn in labels_json['splits'][partition]:
+        preds.append(logits[fn])
+        targets.append(labels_json['labels'][fn])
+
+    preds = np.concatenate(preds, 0)
+    targets = np.concatenate(targets, 0)
+
+    if not is_multilabel:
+        pred_labels = preds.argmax(1)
+        target_labels = targets
+
+        return {
+            f'{prefix}_precision': precision_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
+            f'{prefix}_recall': recall_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
+            f'{prefix}_f1': f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        }
+    else:
+        threshold = 2
+        pred_labels = (preds > threshold) * 1
+        target_labels = targets.astype(int)
+
+        precisions = []
+        recalls = []
+        f1s = []
+
+        for valid_class_ind in valid_classes:
+            precisions.append(precision_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
+            recalls.append(recall_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
+            f1s.append(f1_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
+        return {
+            f'{prefix}_precision': sum(precisions) / len(precisions),
+            f'{prefix}_recall': sum(recalls) / len(recalls),
+            f'{prefix}_f1': sum(f1s) / len(f1s)
+        }
 
 def ensemble_predictions(ans, logits):
     predict_per_item = max([int(x[0].split('_chunkind_')[1]) for x in ans]) + 1
@@ -201,13 +244,13 @@ def fig2img(fig):
 
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
     preds = np.array([x[-2] for x in ans])
-    targets = np.array([x[-1] for x in ans])
-    targets = targets.argmax(1)
+    targets = np.array([x[-1] for x in ans]).astype(int)
+    # targets = targets.argmax(1)
 
     aps = []
     res = {}
     for cls_ind, cls_name in class_names.items():
-        ap = average_precision_score(targets == cls_ind, preds[:, cls_ind])
+        ap = average_precision_score(targets[:, cls_ind], preds[:, cls_ind])
         if cls_name != 'other':
             aps.append(ap)
         res[f'{prefix}_ap_{cls_name}'] = ap 
@@ -302,14 +345,14 @@ def save_inference_results(ans, ema_ans, video_prefix, predict_per_item, labels_
     for fn in labels_json['splits']['inference']:
         ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
 
-    out['preds'] = ensemble_predictions(ans, predict_per_item, ans_logits)
+    out['preds'] = ensemble_predictions(ans, ans_logits)
     out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
     
     if len(ema_ans) > 0:
         ema_logits = {}
         for fn in labels_json['splits']['inference']:
             ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-        out['ema_preds'] = ensemble_predictions(ema_ans, predict_per_item, ema_logits)
+        out['ema_preds'] = ensemble_predictions(ema_ans, ema_logits)
         out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
     with open(save_fn, 'w') as f:
         json.dump(out, f)

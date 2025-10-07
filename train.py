@@ -129,6 +129,7 @@ def main(cfg):
                         target = mix @ target 
                 target = target.reshape(-1, num_classes)
                 output = model(data)
+                output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
                 loss = criterion(output, target)
 
             loss.backward()
@@ -141,7 +142,7 @@ def main(cfg):
                 'lr': lr_scheduler.get_last_lr()[0]
             })
 
-            answers.extend(prep_for_answers(output, target))
+            answers.extend(prep_for_answers(output_prob, target))
             losses.append(loss.item())
             if cfg['run_name'] == 'debug':
                 break

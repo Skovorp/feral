@@ -210,10 +210,12 @@ def main(cfg):
                 data = data.to(device)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = model(data)
-                    answers.extend(prep_for_answers(output, None, names))
+                    output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    answers.extend(prep_for_answers(output_prob, None, names))
                     if model_ema is not None:
                         output_ema = model_ema.ema(data)
-                        answers_ema.extend(prep_for_answers(output_ema, None, names))
+                        output_ema_prob = output_ema if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
+                        answers_ema.extend(prep_for_answers(output_ema_prob, None, names))
         out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
         save_inference_results(answers, answers_ema, cfg['data']['prefix'], cfg['predict_per_item'], labels_json, out_pth)
        

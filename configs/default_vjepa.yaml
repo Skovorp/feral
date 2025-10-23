@@ -14,7 +14,7 @@ data:
   do_aa: true
   part_sample: 1.0
 training:
-  epochs: 10
+  epochs: 1
   train_bs: 4
   val_bs: 8
   num_workers: 4

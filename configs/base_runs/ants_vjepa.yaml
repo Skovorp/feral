@@ -4,8 +4,7 @@ predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
-  freeze_predictor_layers: 0
-  freeze_encoder_layers: 0
+  freeze
 data:
   prefix: "/home/petr/home_datasets/reencoded_ants"
   label_json: "/home/petr/home_datasets/all_configs/new_ant_labels.json"
@@ -14,7 +13,6 @@ data:
   chunk_step: 1
   resize_to: 256
   do_aa: true
-  part_sample: 1.0
 training:
   epochs: 10
   train_bs: 4

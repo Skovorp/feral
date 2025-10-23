@@ -4,8 +4,6 @@ predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: null
-  freeze_predictor_layers: 0
-  freeze_encoder_layers: 0
 data:
   prefix: "/home/petr/home_datasets/reencoded_mabe_beetle"
   label_json: "/home/petr/home_datasets/all_configs/fix_mabe_beetle_labels.json"
@@ -14,7 +12,6 @@ data:
   chunk_step: 1
   resize_to: 256
   do_aa: true
-  part_sample: 1.0
 training:
   epochs: 10
   train_bs: 4

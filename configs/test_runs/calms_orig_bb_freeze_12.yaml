@@ -1,12 +1,13 @@
-run_name: rerun_collective_ants
-model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
+run_name: rerun_calms_orig_bb_freeze_12
+model_name: "facebook/vjepa2-vitl-fpc64-256"
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
+  freeze_encoder_layers: 12
 data:
-  prefix: "/home/petr/home_datasets/toms/reencoded"
-  label_json: "/home/petr/home_datasets/toms/feral_schema_labels_fix.json"
+  prefix: "/home/petr/home_datasets/reencoded_calms"
+  label_json: "/data/petr/caltech_mice/new_calms_labels.json"
   chunk_length: 64
   chunk_shift: 32
   chunk_step: 1
@@ -21,7 +22,7 @@ training:
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.1
-  compile: true
+  compile: false
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0
@@ -30,3 +31,5 @@ wandb:
   key: dde17687b4b84ba8171dfede64d865243be41a0e
   entity: sposiboh
   project: feral_public
+
+  facebook/vjepa2-vitl-fpc32-256-diving48

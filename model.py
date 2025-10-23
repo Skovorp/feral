@@ -25,45 +25,34 @@ class AttentionPoolingBlockCustom(nn.Module):
         return attn_output
 
 class HFModel(nn.Module):
-    def __init__(self, model_name, num_classes, predict_per_item, fc_drop_rate, 
-                 freeze_predictor_layers, freeze_encoder_layers, **kwargs):
+    def __init__(self, model_name, num_classes, predict_per_item, fc_drop_rate, freeze_encoder_layers=0, **kwargs):
         super().__init__()
         self.model = AutoModel.from_pretrained(model_name)
+        backbone_dim = 1024
+        self.model.predictor = None
 
-        backbone_dim = self.get_backbone_outp_dim()
         self.clip_projector = AttentionPoolingBlockCustom(
             embed_dim=backbone_dim, num_heads=16, out_tokens=predict_per_item
         )
         self.fc_norm = nn.BatchNorm1d(backbone_dim)
         self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
         self.head = nn.Linear(backbone_dim, num_classes)
+        self.freeze_model(freeze_encoder_layers)
 
-        self.freeze_model(freeze_predictor_layers, freeze_encoder_layers)
+    def freeze_model(self, freeze_encoder_layers: int):
+        def freeze(m):
+            for param in m.parameters():
+                param.requires_grad = False
 
-    def get_backbone_outp_dim(self):
-        x = torch.zeros((1, 64, 3, 512, 512))
-        out = self.model(x).last_hidden_state
-        return out.shape[-1]
-
-    def freeze_model(self, freeze_predictor_layers: int, freeze_encoder_layers: int):
-        encoder_layers = self.model.encoder.layer
-        assert freeze_encoder_layers <= len(encoder_layers), (
-            f"Only {len(encoder_layers)} encoder layers available, got freeze_encoder_layers={freeze_encoder_layers}"
+        freeze(self.model.encoder.embeddings)
+        assert freeze_encoder_layers <= len(self.model.encoder.layer), (
+            f"Only {len(self.model.encoder.layer)} encoder layers available, got freeze_encoder_layers={freeze_encoder_layers}"
         )
         for i in range(freeze_encoder_layers):
-            for param in encoder_layers[i].parameters():
-                param.requires_grad = False
-
-        predictor_layers = self.model.predictor.layer
-        assert freeze_predictor_layers <= len(predictor_layers), (
-            f"Only {len(predictor_layers)} predictor layers available, got freeze_predictor_layers={freeze_predictor_layers}"
-        )
-        for i in range(freeze_predictor_layers):
-            for param in predictor_layers[i].parameters():
-                param.requires_grad = False
+            freeze(self.model.encoder.layer[i])
 
     def forward(self, x):
-        x = self.model(x).last_hidden_state
+        x = self.model(x, skip_predictor=True).last_hidden_state
         x = self.clip_projector(x)
         x = self.fc_norm(x)
         x = self.head(self.fc_dropout(x))

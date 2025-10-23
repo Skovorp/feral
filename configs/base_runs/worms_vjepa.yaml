@@ -12,7 +12,6 @@ data:
   chunk_step: 1
   resize_to: 256
   do_aa: true
-  part_sample: 1.0
 training:
   epochs: 10
   train_bs: 4

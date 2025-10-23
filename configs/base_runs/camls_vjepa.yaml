@@ -1,9 +1,11 @@
-run_name: camls_15ep
+run_name: rerun_calms
 model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
+  freeze_predictor_layers: 0
+  freeze_encoder_layers: 0
 data:
   prefix: "/home/petr/home_datasets/reencoded_calms"
   label_json: "/data/petr/caltech_mice/new_calms_labels.json"
@@ -12,8 +14,9 @@ data:
   chunk_step: 1
   resize_to: 256
   do_aa: true
+  part_sample: 1.0
 training:
-  epochs: 15
+  epochs: 10
   train_bs: 4
   val_bs: 8
   num_workers: 12
@@ -21,7 +24,7 @@ training:
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.1
-  compile: true
+  compile: false
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0

@@ -3,11 +3,6 @@ model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
-  drop_path: 0
-  head_drop_path: 0
-  freeze_layers: 0
-  freeze_embeddings: false
-  backbone_dropout: 0
   class_weights: inv_freq_sqrt
   freeze_predictor_layers: 0
   freeze_encoder_layers: 0

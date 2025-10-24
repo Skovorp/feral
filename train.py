@@ -91,6 +91,7 @@ def main(cfg):
     for el in model.state_dict().values():
         tot += el.numel()
     print(f"parameters: {tot:_d}")
+    print(f"Dataset is multilabel: {train_dataset.is_multilabel}")
 
     if train_dataset.is_multilabel:
         criterion = torch.nn.BCEWithLogitsLoss()

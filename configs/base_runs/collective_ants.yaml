@@ -1,9 +1,10 @@
-run_name: rerun_collective_ants
-model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
+run_name: base_collective_ants
+model_name: "facebook/vjepa2-vitl-fpc32-256-diving48"
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
+  freeze_encoder_layers: 12
 data:
   prefix: "/home/petr/home_datasets/toms/reencoded"
   label_json: "/home/petr/home_datasets/toms/feral_schema_labels_fix.json"

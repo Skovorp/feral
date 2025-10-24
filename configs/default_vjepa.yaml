@@ -4,7 +4,7 @@ predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
-  freeze_encoder_layers: 0
+  freeze_encoder_layers: 12
 data:
   chunk_length: 64
   chunk_shift: 32

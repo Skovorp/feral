@@ -1,14 +1,10 @@
 run_name: camls_every4_no_overlap
-model_name: "facebook/vjepa2-vitl-fpc16-256-ssv2"
+model_name: "facebook/vjepa2-vitl-fpc32-256-diving48"
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
-  drop_path: 0
-  head_drop_path: 0
-  freeze_layers: 0
-  freeze_embeddings: false
-  backbone_dropout: 0
   class_weights: inv_freq_sqrt
+  freeze_encoder_layers: 12
 data:
   prefix: "/home/petr/home_datasets/reencoded_calms"
   label_json: "/data/petr/caltech_mice/new_calms_labels.json"
@@ -21,8 +17,8 @@ training:
   epochs: 10
   train_bs: 4
   val_bs: 8
-  num_workers: 16
-  warmup_epochs: 2
+  num_workers: 12
+  part_warmup: 0.2
   lr: 4.0e-5
   weight_decay: 0.1
   label_smoothing: 0.1

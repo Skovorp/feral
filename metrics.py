@@ -135,7 +135,7 @@ def generate_empty_logits(labels_json, partition):
         logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
     return logits
 
-def generate_raster_plot(ans, predict_per_item, labels_json, partition):
+def generate_raster_plot(ans, labels_json, partition):
     try:
         logits = generate_empty_logits(labels_json, partition)
         logits = ensemble_predictions(ans, logits)
@@ -167,20 +167,21 @@ def generate_raster_plot(ans, predict_per_item, labels_json, partition):
         arr_diff = (arr_pred != arr_label).astype(int)
 
         # Prepare colormaps and labels
-        all_classes = sorted(set(np.unique(arr_pred)) | set(np.unique(arr_label)))
-        num_classes = len(all_classes)
         base_cmap = cm.get_cmap('nipy_spectral')
 
         # Skip dark colors near 0.0 — start sampling from 0.05 or 0.1
-        color_range = np.linspace(0.1, 1.0, num_classes)
+        color_range = np.linspace(0.1, 1.0, len(class_names))
         colors = [base_cmap(val) for val in color_range]
+        
+        if 'other' in class_names.values():
+            ind = list(class_names.values()).index('other')
+            colors[ind], colors[-1] = colors[-1], colors[ind]
 
         cmap = ListedColormap(colors)
         diff_cmap = ListedColormap(['white', 'red'])
 
         labels = ['prediction', 'label', 'mismatch']
-        class_id_to_name = class_names
-        legend_elements = [mpatches.Patch(color=colors[i], label=class_id_to_name[i]) for i in all_classes]
+        legend_elements = [mpatches.Patch(color=colors[i], label=f"({i}) {class_names[i]}") for i in range(len(class_names))]
 
         # Plot
         fig, axs = plt.subplots(3, 1, figsize=(32, 4), sharex=True)
@@ -213,7 +214,7 @@ def generate_raster_plot(ans, predict_per_item, labels_json, partition):
         legend_ax.legend(
             handles=legend_elements,
             loc='center',
-            ncol=min(len(legend_elements), 6),
+            ncol=min(len(legend_elements), 8),
             fontsize=14,
             frameon=False
         )

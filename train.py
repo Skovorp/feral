@@ -186,7 +186,7 @@ def main(cfg):
             **calculate_f1_metrics(answers, labels_json, 'val', train_dataset.is_multilabel, 'val'),
             'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'], labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
-            'val_raster_plot': wandb.Image(generate_raster_plot(answers, cfg['predict_per_item'], labels_json, 'val'))
+            'val_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
         }
         if model_ema is not None:
             ema_logs = {
@@ -194,7 +194,7 @@ def main(cfg):
                  **calculate_f1_metrics(answers_ema, labels_json, 'val', train_dataset.is_multilabel, 'ema_val'),
                 'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'], labels_json, 'val'),
                 'ema_val_loss': sum(losses_ema) / len(losses_ema),
-                'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, cfg['predict_per_item'], labels_json, 'val'))
+                'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
             }
             logs.update(ema_logs)
         print(logs)

@@ -8,12 +8,6 @@
 
 Direct video-to-behavior segmentation — no tracking, no pose estimation.
 
----
-
-![FERAL Demo 1](https://www.getferal.ai/src/videos/worms_example.gif)
-![FERAL Demo 2](https://www.getferal.ai/src/videos/ants_example.gif)
-
----
 
 FERAL (Feature Extraction for Recognition of Animal Locomotion) is an open-source video-understanding toolkit that automatically segments animal behavior directly from raw video, without pose tracking or object detection.
 
@@ -108,7 +102,7 @@ FERAL has been validated on multiple datasets:
 - C. elegans – locomotor states (forward/reverse/turn/pause)  
 - Ooceraea biroi – self vs. allogrooming and collective raids  
 
-Access details and converters are documented at [getferal.ai/datasets](https://getferal.ai/datasets).
+Access details and converters are documented at [getferal.ai/datasets](https://getferal.ai).
 
 ## Deployment Options
 

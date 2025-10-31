@@ -116,8 +116,6 @@ Step-by-step deployment guides for each environment are available in the documen
 
 Please contact us at jrazzauti@rockefeller.edu or pskovordnikov@rockefeller.edu for instructions on how to cite our work.
 
-Contributions welcome — see CONTRIBUTING.md.
-
 ## Authors
 
 Peter Skovorodnikov† (Rockefeller University)†
@@ -126,8 +124,5 @@ Jacopo Razzauti† (Vosshall Lab, Rockefeller University; Price Family Center fo
 
 † Equal contribution  
 Contact: jrazzauti@rockefeller.edu | pskovorodnikov@rockefeller.edu
-
-## License
-This project is released under the MIT License.
 
 

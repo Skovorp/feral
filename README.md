@@ -57,7 +57,7 @@ pip install -r requirements.txt
 ### Requirements
 - Python ≥ 3.10  
 - PyTorch 2.4 + CUDA 12.4  
-- NVIDIA GPU (≥ 16 GB VRAM recommended) 
+- NVIDIA GPU (≥ 24 GB VRAM recommended) 
 
 ## Dataset Preparation
 

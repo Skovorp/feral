@@ -75,6 +75,11 @@ def main(cfg):
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     model.to(device)
 
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+
     if cfg['training']['compile']:
         model = torch.compile(model, mode="max-autotune")
 
@@ -110,10 +115,14 @@ def main(cfg):
         model.train()
         answers = []
         losses = []
-        eye = torch.eye(cfg['training']['train_bs'], device=device)
         for data, target in tqdm(train_loader, total=len(train_loader)):
             data = data.to(device)
             target = target.to(device)
+            
+            # Create eye matrix based on actual batch size (needed for multi-GPU)
+            batch_size = data.shape[0]
+            eye = torch.eye(batch_size, device=device)
+            
             optimizer.zero_grad()
 
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):

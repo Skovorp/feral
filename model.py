@@ -25,10 +25,17 @@ class AttentionPoolingBlockCustom(nn.Module):
         return attn_output
 
 class HFModel(nn.Module):
-    def __init__(self, model_name, num_classes, predict_per_item, fc_drop_rate, freeze_encoder_layers=0, **kwargs):
+    def __init__(self, 
+            model_name, 
+            num_classes, 
+            predict_per_item, 
+            fc_drop_rate, 
+            freeze_encoder_layers=0,
+            **kwargs):
         super().__init__()
         self.model = AutoModel.from_pretrained(model_name)
         backbone_dim = 1024
+        self.patch_size = 256
         self.model.predictor = None
 
         self.clip_projector = AttentionPoolingBlockCustom(
@@ -52,7 +59,20 @@ class HFModel(nn.Module):
             freeze(self.model.encoder.layer[i])
 
     def forward(self, x):
+        batch, frames, channels, height, width = x.shape
+        cropped = False
+        if height != self.patch_size:
+            cropped = True
+            grid_h = height // self.patch_size
+            grid_w = width // self.patch_size
+            patch_count = grid_h * grid_w
+            x = x.reshape(batch, frames, channels, grid_h, self.patch_size, grid_w, self.patch_size)
+            x = x.permute(0, 3, 5, 1, 2, 4, 6).reshape(
+                batch * patch_count, frames, channels, self.patch_size, self.patch_size
+            )
         x = self.model(x, skip_predictor=True).last_hidden_state
+        if cropped:
+            x = x.view(batch, patch_count * x.shape[1], x.shape[2])
         x = self.clip_projector(x)
         x = self.fc_norm(x)
         x = self.head(self.fc_dropout(x))

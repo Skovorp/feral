@@ -84,6 +84,9 @@ class ClsDataset():
             for frames in frame_ids:
                 self.samples.append((fn, frames))
                 if self.partition != 'inference':
+                    json_total_frames = len(self.json_data['labels'][fn])
+                    video_total_frames = get_frame_count(os.path.join(self.prefix, fn))
+                    assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )

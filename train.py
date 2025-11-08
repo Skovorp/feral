@@ -98,10 +98,11 @@ def main(cfg):
     print(f"parameters: {tot:_d}")
     print(f"Dataset is multilabel: {train_dataset.is_multilabel}")
 
+    class_weights = get_weights(train_dataset.json_data, cfg['model']['class_weights'], device)
     if train_dataset.is_multilabel:
-        criterion = torch.nn.BCEWithLogitsLoss()
+        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
     else:
-        criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['label_smoothing'], weight=get_weights(train_dataset.json_data, cfg['model']['class_weights'], device))
+        criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['label_smoothing'], weight=class_weights)
     optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=cfg['training']['lr'], weight_decay=cfg['training']['weight_decay'])
 
     total_steps = len(train_loader) * cfg['training']['epochs']

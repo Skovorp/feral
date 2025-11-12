@@ -36,9 +36,18 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
-def get_frame_count(video_path):
-    vr = VideoReader(video_path)
-    return len(vr)
+# def get_frame_count(video_path):
+#     vr = VideoReader(video_path)
+#     return len(vr)
+
+def get_frame_count(path: str) -> int | None:
+    # much faster, hopefully as accurate
+    cap = cv2.VideoCapture(path)
+    try:
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        return n if n > 0 else None
+    finally:
+        cap.release()
 
 class ClsDataset():
     def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, part_sample=1.0, **kwargs):

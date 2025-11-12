@@ -75,11 +75,6 @@ def main(cfg):
     model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     model.to(device)
 
-    # Multi-GPU support
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = torch.nn.DataParallel(model)
-
     if cfg['training']['compile']:
         model = torch.compile(model, mode="max-autotune")
 

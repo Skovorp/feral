@@ -25,17 +25,22 @@ def prep_for_answers(outputs, targets, names=None):
         return list(zip(outputs, targets))
     
 def get_weights(json_data, weight_type, device):
-    assert weight_type in ('inv_freq', 'inv_freq_sqrt', None), "weight_type should be 'inv_freq_sqrt', 'sqrt' or None"
+    assert weight_type is None or weight_type in ('inv_freq', 'inv_freq_sqrt'), "weight_type should be 'inv_freq', 'inv_freq_sqrt' or None"
     if weight_type is None:
         return None 
-    arr = np.concatenate(list(json_data['labels'].values()))
-    freqs = np.bincount(arr) / arr.shape
-    inv_freqs = 1.0 / torch.tensor(freqs).to(device)
-
+    arr = np.concatenate([json_data['labels'][x] for x in json_data['splits']['train']])
+    if len(arr.shape) == 1:
+        freqs = torch.tensor(np.bincount(arr) / arr.shape)
+        ratio = (1.0 / freqs).to(device)
+    elif len(arr.shape) == 2:
+        freqs = torch.tensor(arr.mean(0))
+        ratio = ((1 - freqs) / freqs).to(device)    
+    assert freqs.min().item() > 0, f"Some classes don't have any examples. Class frequencies: {freqs}"
+        
     if weight_type == 'inv_freq':
-        return inv_freqs
+        return ratio
     elif weight_type == 'inv_freq_sqrt':
-        return torch.sqrt(inv_freqs)
+        return torch.sqrt(ratio)
     
 
 def get_random_run_name():

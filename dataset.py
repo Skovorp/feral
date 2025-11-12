@@ -36,9 +36,18 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
-def get_frame_count(video_path):
-    vr = VideoReader(video_path)
-    return len(vr)
+# def get_frame_count(video_path):
+#     vr = VideoReader(video_path)
+#     return len(vr)
+
+def get_frame_count(path: str) -> int | None:
+    # much faster, hopefully as accurate
+    cap = cv2.VideoCapture(path)
+    try:
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        return n if n > 0 else None
+    finally:
+        cap.release()
 
 class ClsDataset():
     def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, part_sample=1.0, **kwargs):
@@ -84,6 +93,9 @@ class ClsDataset():
             for frames in frame_ids:
                 self.samples.append((fn, frames))
                 if self.partition != 'inference':
+                    json_total_frames = len(self.json_data['labels'][fn])
+                    video_total_frames = get_frame_count(os.path.join(self.prefix, fn))
+                    assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )

@@ -11,7 +11,7 @@ import json
 import datetime
 import numpy as np 
 import random
-
+from metrics import generate_empty_logits, ensemble_predictions
 from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
 from utils import prep_for_answers, get_weights
 from timm.utils import ModelEma
@@ -37,6 +37,7 @@ def main(cfg):
     num_classes = len(class_names)
 
     os.makedirs("answers", exist_ok=True)
+    os.makedirs("checkpoints", exist_ok=True)
 
     torch.manual_seed(cfg['seed'])
     np.random.seed(cfg['seed'])
@@ -62,6 +63,15 @@ def main(cfg):
     val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
     
+    if 'test' in labels_json['splits']:
+        test_dataset = ClsDataset(partition='test', model_name=cfg['model_name'], 
+                            num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
+        test_loader = DataLoader(test_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
+                            batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+    else:
+        print("No test dataset")
+        test_loader = None
+        
     if 'inference' in labels_json['splits']:
         inference_dataset = ClsDataset(partition='inference', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
@@ -76,7 +86,7 @@ def main(cfg):
     model.to(device)
 
     if cfg['training']['compile']:
-        model = torch.compile(model, mode="max-autotune")
+        model = torch.compile(model, mode="max-autotune", dynamic=True)
 
     if cfg['ema_decay'] is not None:
         model_ema = ModelEma(
@@ -104,8 +114,11 @@ def main(cfg):
     warmup_steps = round(total_steps * cfg['training']['part_warmup'])
     lr_scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
-
     mixup = None if cfg['mixup_alpha'] is None else MixUp(alpha=cfg['mixup_alpha'], num_classes=cfg['training']['train_bs'])
+    
+    best_checkpoint_path = os.path.join("checkpoints", f"{cfg['run_name']}_best_checkpoint.pt")
+    best_map = -1
+    epochs_without_updates = 0
 
     for epoch in range(cfg['training']['epochs']):
         model.train()
@@ -135,7 +148,7 @@ def main(cfg):
                         target = mix @ target 
                 target = target.reshape(-1, num_classes)
                 output = model(data)
-                output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
                 loss = criterion(output, target)
 
             loss.backward()
@@ -160,6 +173,8 @@ def main(cfg):
         wandb.log(logs)
 
         model.eval()
+        if model_ema is not None:
+            model_ema.ema.eval()
         answers = []
         losses = []
         answers_ema = []
@@ -172,14 +187,14 @@ def main(cfg):
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = model(data)
                     loss = criterion(output, target)
-                    output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
                     answers.extend(prep_for_answers(output_prob, target, names))
                     losses.append(loss.item())
 
                     if model_ema is not None:
                         output_ema = model_ema.ema(data)
                         loss_ema = criterion(output_ema, target)
-                        output_ema_prob = output_ema if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
+                        output_ema_prob = torch.sigmoid(output_ema) if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
                         answers_ema.extend(prep_for_answers(output_ema_prob, target, names))
                         losses_ema.append(loss_ema.item())
                     if cfg['run_name'] == 'debug':
@@ -189,7 +204,7 @@ def main(cfg):
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'val'),
             **calculate_f1_metrics(answers, labels_json, 'val', train_dataset.is_multilabel, 'val'),
-            'val_frame_level_map': calc_frame_level_map(answers, cfg['predict_per_item'], labels_json, 'val'),
+            'val_frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
             'val_loss': sum(losses) / len(losses),
             'val_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
         }
@@ -197,33 +212,110 @@ def main(cfg):
             ema_logs = {
                 **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
                  **calculate_f1_metrics(answers_ema, labels_json, 'val', train_dataset.is_multilabel, 'ema_val'),
-                'ema_val_frame_level_map': calc_frame_level_map(answers_ema, cfg['predict_per_item'], labels_json, 'val'),
+                'ema_val_frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
                 'ema_val_loss': sum(losses_ema) / len(losses_ema),
                 'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
             }
             logs.update(ema_logs)
         print(logs)
         wandb.log(logs)
+
+        # save best model
+        val_map = logs['val_frame_level_map']
+        ema_map = logs.get('ema_val_frame_level_map', -2)
+        if val_map > ema_map and val_map > best_map:
+            m = model
+            if hasattr(m, '_orig_mod'):
+                m = m._orig_mod
+            torch.save(m.state_dict(), best_checkpoint_path)
+            best_map = val_map
+            epochs_without_updates = 0  
+            print(f"Saved base model checkpoint with val_frame_level_map={val_map:.4f}")
+        elif model_ema is not None and ema_map > val_map and ema_map > best_map:
+            m = model_ema.ema
+            if hasattr(m, '_orig_mod'):
+                m = m._orig_mod
+            torch.save(m.state_dict(), best_checkpoint_path)
+            best_map = ema_map
+            epochs_without_updates = 0
+            print(f"Saved EMA model checkpoint with ema_val_frame_level_map={ema_map:.4f}")
+        else:
+            epochs_without_updates += 1
+            print(f"Didnt improve for {epochs_without_updates}/{cfg['training']['patience']} epochs")
+
+            if epochs_without_updates >= cfg['training']['patience']:
+                print(f"Early stopping: no improvement for {cfg['training']['patience']} epochs, stopping training.")
+                break
     
-    model.eval()
-    answers = []
-    answers_ema = []
     print("Finished training")
+    print(f"Best checkpoint: {best_checkpoint_path}. best_map: {best_map:4f}")
+    if inference_loader is None and test_loader is None:
+        return
+    
+    del model 
+    del model_ema
+    del optimizer
+    del lr_scheduler
+    torch.cuda.empty_cache()
+    
+    print("Loading best model")
+    best_model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
+    best_model_state = torch.load(best_checkpoint_path, map_location="cpu")
+    best_model.load_state_dict(best_model_state)
+    best_model.to(device)
+    if cfg['training']['compile']:
+        best_model = torch.compile(best_model, mode="max-autotune", dynamic=True)
+    best_model.eval()
+
+    if test_loader is not None:
+        print("Running test...")
+        answers = []
+        with torch.no_grad():
+            for data, target, names in tqdm(test_loader, total=len(test_loader)):
+                data = data.to(device)
+                target = target.view(-1, num_classes)
+                with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
+                    output = best_model(data)
+                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    answers.extend(prep_for_answers(output_prob, target, names))
+        with open(os.path.join("answers", f"{cfg['run_name']}_raw_test.json"), 'w') as f:
+            json.dump(answers, f)
+        predictions = generate_empty_logits(labels_json, 'test')
+        predictions = ensemble_predictions(answers, predictions)
+        with open(os.path.join("answers", f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
+            if train_dataset.is_multilabel:
+                json.dump({
+                    'pred': {x: ((y > 0.85) * 1).tolist() for x, y in predictions.items()},
+                    'gt': {x: labels_json['labels'][x] for x, y in predictions.items()},
+                    'class_names': labels_json['class_names']
+                }, f)
+            else:
+                json.dump({
+                    'pred': {x: y.argmax(1).tolist() for x, y in predictions.items()},
+                    'gt': {x: labels_json['labels'][x] for x, y in predictions.items()},
+                    'class_names': labels_json['class_names']
+                }, f)
+        logs = {
+            **calculate_multiclass_metrics(answers, class_names, 'test'),
+            **calculate_f1_metrics(answers, labels_json, 'test', train_dataset.is_multilabel, 'test'),
+            'test_frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
+            'test_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
+        }
+        print(logs)
+        wandb.log(logs)
+
     if inference_loader is not None:
         print("Running inference...")
+        answers = []
         with torch.no_grad():
             for data, names in tqdm(inference_loader, total=len(inference_loader)):
                 data = data.to(device)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                    output = model(data)
-                    output_prob = output if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    output = best_model(data)
+                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
                     answers.extend(prep_for_answers(output_prob, None, names))
-                    if model_ema is not None:
-                        output_ema = model_ema.ema(data)
-                        output_ema_prob = output_ema if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
-                        answers_ema.extend(prep_for_answers(output_ema_prob, None, names))
         out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-        save_inference_results(answers, answers_ema, cfg['data']['prefix'], cfg['predict_per_item'], labels_json, out_pth)
+        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth)
        
 
 if __name__ == '__main__':

@@ -71,23 +71,6 @@ def get_random_run_name():
         random.choice(adjectives),
         random.choice(cool_animals)
     ])
-    
-
-# def last_nonzero_index(arr):
-#     idx = np.arange(len(arr))
-#     nonzero_idx = np.where(arr != 0, idx, -1)
-#     acc = np.maximum.accumulate(nonzero_idx)
-#     acc[acc == -1] = 0
-#     return acc
-
-# def next_nonzero_index(arr):
-#     idx = np.arange(len(arr))
-#     rev_idx = idx[::-1]
-#     rev_arr = arr[::-1]
-#     nonzero_rev = np.where(rev_arr != 0, rev_idx, -1)
-#     acc = np.maximum.accumulate(nonzero_rev)
-#     acc[acc == -1] = len(arr) - 1
-#     return acc[::-1]
 
 def last_nonzero_index(arr):
     out = np.empty_like(arr, dtype=int)

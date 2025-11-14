@@ -22,6 +22,7 @@ training:
   weight_decay: 0.1
   label_smoothing: 0.1
   compile: true
+  patience: 4
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0

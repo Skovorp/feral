@@ -114,7 +114,7 @@ Step-by-step deployment guides for each environment are available in the documen
 
 ## Citation
 
-Please contact us at jrazzauti@rockefeller.edu or pskovordnikov@rockefeller.edu for instructions on how to cite our work.
+Please contact us at jacopo.razza@gmail.com or peter.skovorodnikov@gmail.com for instructions on how to cite our work.
 
 ## Authors
 
@@ -123,6 +123,6 @@ Jacopo Razzauti† (Vosshall Lab, Rockefeller University; Price Family Center fo
 
 
 † Equal contribution  
-Contact: jrazzauti@rockefeller.edu | pskovorodnikov@rockefeller.edu
+Contact: jacopo.razza@gmail.com | peter.skovorodnikov@gmail.com
 
 

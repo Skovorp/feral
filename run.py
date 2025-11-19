@@ -17,11 +17,18 @@ if __name__ == '__main__':
         default=None,
         help="Optional path to a checkpoint to load into cfg['starting_checkpoint']."
     )
+    parser.add_argument(
+        '--part_subsample',
+        type=float,
+        default=None,
+        help="Optional fraction (0-1) that reduces the number of samples in the train dataset. E.g. 0.5 keeps 50% of training samples."
+    )
     args = parser.parse_args()
 
     prefix_path = args.video_folder
     label_json_path = args.label_json_path
     checkpoint_path = args.checkpoint
+    part_subsample = args.part_subsample
 
     assert os.path.exists(prefix_path), f"Prefix path does not exist: {prefix_path}"
     assert os.path.exists(label_json_path), f"Label JSON file does not exist: {label_json_path}"
@@ -36,6 +43,11 @@ if __name__ == '__main__':
     cfg['run_name'] = get_random_run_name()
     if checkpoint_path is not None:
         cfg['starting_checkpoint'] = checkpoint_path
+    if part_subsample is not None:
+        part_subsample = float(part_subsample)
+        if not (0.0 <= part_subsample <= 1.0):
+            raise ValueError(f"--part_subsample must be between 0 and 1, got {part_subsample}")
+        cfg['data']['part_sample'] = part_subsample
 
     res = input('\nDo you want logs for your run to be on a community Weights & Biases account? No setup required, but everyone will be able to see logs for your run. You can also create your personal project on WandB and log there. Type "open" or "personal": ').strip().lower()
     if res == "open":

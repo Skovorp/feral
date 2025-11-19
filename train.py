@@ -57,6 +57,7 @@ def main(cfg):
                                 num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['train_bs'], num_workers=cfg['training']['num_workers'])
+        assert labels_json['is_multilabel'] == train_dataset.is_multilabel, f"Config is_multilabel doesn't match the data! config: {labels_json['is_multilabel']} dataset: {train_dataset.is_multilabel}"
     else:
         print("No train dataset")
         train_loader = None
@@ -66,6 +67,7 @@ def main(cfg):
                                 num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                                 batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+        assert labels_json['is_multilabel'] == val_dataset.is_multilabel, f"Config is_multilabel doesn't match the data! config: {labels_json['is_multilabel']} dataset: {val_dataset.is_multilabel}"
     else:
         print("No val dataset")
         val_loader = None
@@ -75,6 +77,7 @@ def main(cfg):
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         test_loader = DataLoader(test_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
                             batch_size=cfg['training']['val_bs'], num_workers=cfg['training']['num_workers'], collate_fn=collate_fn_val)
+        assert labels_json['is_multilabel'] == test_dataset.is_multilabel, f"Config is_multilabel doesn't match the data! config: {labels_json['is_multilabel']} dataset: {test_dataset.is_multilabel}"
     else:
         print("No test dataset")
         test_loader = None
@@ -109,10 +112,10 @@ def main(cfg):
         for el in model.state_dict().values():
             tot += el.numel()
         print(f"parameters: {tot:_d}")
-        print(f"Dataset is multilabel: {train_dataset.is_multilabel}")
+        print(f"Dataset is multilabel: {labels_json['is_multilabel']}")
 
         class_weights = get_weights(train_dataset.json_data, cfg['model']['class_weights'], device)
-        if train_dataset.is_multilabel:
+        if labels_json['is_multilabel']:
             criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
         else:
             criterion = torch.nn.CrossEntropyLoss(label_smoothing=cfg['training']['label_smoothing'], weight=class_weights)
@@ -156,7 +159,7 @@ def main(cfg):
                             target = mix @ target 
                     target = target.reshape(-1, num_classes)
                     output = model(data)
-                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    output_prob = torch.sigmoid(output) if labels_json['is_multilabel'] else torch.nn.functional.softmax(output, 1)
                     loss = criterion(output, target)
 
                 loss.backward()
@@ -202,14 +205,14 @@ def main(cfg):
                     with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                         output = model(data)
                         loss = criterion(output, target)
-                        output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                        output_prob = torch.sigmoid(output) if labels_json['is_multilabel'] else torch.nn.functional.softmax(output, 1)
                         answers.extend(prep_for_answers(output_prob, target, names))
                         losses.append(loss.item())
 
                         if model_ema is not None:
                             output_ema = model_ema.ema(data)
                             loss_ema = criterion(output_ema, target)
-                            output_ema_prob = torch.sigmoid(output_ema) if train_dataset.is_multilabel else torch.nn.functional.softmax(output_ema, 1)
+                            output_ema_prob = torch.sigmoid(output_ema) if labels_json['is_multilabel'] else torch.nn.functional.softmax(output_ema, 1)
                             answers_ema.extend(prep_for_answers(output_ema_prob, target, names))
                             losses_ema.append(loss_ema.item())
                         if cfg['run_name'] == 'debug':
@@ -218,7 +221,7 @@ def main(cfg):
                 json.dump(answers, f)
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'val'),
-                **calculate_f1_metrics(answers, labels_json, 'val', train_dataset.is_multilabel, 'val'),
+                **calculate_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val'),
                 'val_frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
                 'val_loss': sum(losses) / len(losses),
                 'val_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
@@ -226,7 +229,7 @@ def main(cfg):
             if model_ema is not None:
                 ema_logs = {
                     **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
-                    **calculate_f1_metrics(answers_ema, labels_json, 'val', train_dataset.is_multilabel, 'ema_val'),
+                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'ema_val'),
                     'ema_val_frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
                     'ema_val_loss': sum(losses_ema) / len(losses_ema),
                     'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
@@ -264,14 +267,13 @@ def main(cfg):
         
         print("Finished training")
         print(f"Best checkpoint: {best_checkpoint_path}. best_map: {best_map:4f}")
+        del model 
+        del model_ema
+        del optimizer
+        del lr_scheduler
+        torch.cuda.empty_cache()
     if inference_loader is None and test_loader is None:
         return
-    
-    del model 
-    del model_ema
-    del optimizer
-    del lr_scheduler
-    torch.cuda.empty_cache()
     
     print("Loading model for test/inference")
     if train_loader is not None:
@@ -296,14 +298,14 @@ def main(cfg):
                 target = target.view(-1, num_classes)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = best_model(data)
-                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    output_prob = torch.sigmoid(output) if labels_json['is_multilabel'] else torch.nn.functional.softmax(output, 1)
                     answers.extend(prep_for_answers(output_prob, target, names))
         with open(os.path.join("answers", f"{cfg['run_name']}_raw_test.json"), 'w') as f:
             json.dump(answers, f)
         predictions = generate_empty_logits(labels_json, 'test')
         predictions = ensemble_predictions(answers, predictions)
         with open(os.path.join("answers", f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
-            if train_dataset.is_multilabel:
+            if labels_json['is_multilabel']:
                 json.dump({
                     'pred': {x: ((y > 0.85) * 1).tolist() for x, y in predictions.items()},
                     'gt': {x: labels_json['labels'][x] for x, y in predictions.items()},
@@ -317,7 +319,7 @@ def main(cfg):
                 }, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'test'),
-            **calculate_f1_metrics(answers, labels_json, 'test', train_dataset.is_multilabel, 'test'),
+            **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test'),
             'test_frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
             'test_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
         }
@@ -332,7 +334,7 @@ def main(cfg):
                 data = data.to(device)
                 with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                     output = best_model(data)
-                    output_prob = torch.sigmoid(output) if train_dataset.is_multilabel else torch.nn.functional.softmax(output, 1)
+                    output_prob = torch.sigmoid(output) if labels_json['is_multilabel'] else torch.nn.functional.softmax(output, 1)
                     answers.extend(prep_for_answers(output_prob, None, names))
         out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
         save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth)

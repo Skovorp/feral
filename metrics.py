@@ -15,7 +15,7 @@ import traceback
 from utils import last_nonzero_index, next_nonzero_index
 from dataset import get_frame_count
 
-def calc_frame_level_map(ans, predict_per_item, labels_json, partition):
+def calc_frame_level_map(ans, labels_json, partition):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
     logits = generate_empty_logits(labels_json, partition)
@@ -69,7 +69,7 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
             f'{prefix}_f1': f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
         }
     else:
-        threshold = 2
+        threshold = 0.85
         pred_labels = (preds > threshold) * 1
         target_labels = targets.astype(int)
 
@@ -152,7 +152,7 @@ def generate_raster_plot(ans, labels_json, partition):
         for name in video_names:
             pred = logits[name].argmax(1)
             label = np.array(all_data[name])
-            assert len(label.shape) == 1, f"Labels must mutually exclusive for rester plot. Labels must be 1d array, got {label.shape}"
+            assert len(label.shape) == 1, f"Rn rasters only work for single class classification. Labels must be 1d array, got {label.shape}"
 
             preds_list.append(pred)
             targets_list.append(label)
@@ -259,7 +259,7 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
     return res
 
 
-def generate_video_mismatches(ans, predict_per_item, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
+def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, logits)
@@ -339,7 +339,7 @@ def generate_video_mismatches(ans, predict_per_item, labels_json, partition, pre
     out.release()
 
 
-def save_inference_results(ans, ema_ans, video_prefix, predict_per_item, labels_json, save_fn):
+def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn):
     out = {}
     
     ans_logits = {} 

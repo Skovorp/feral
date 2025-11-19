@@ -41,7 +41,8 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
 #     return len(vr)
 
 def get_frame_count(path: str) -> int | None:
-    # much faster, hopefully as accurate
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Video not found: {path}")
     cap = cv2.VideoCapture(path)
     try:
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -71,15 +72,20 @@ class ClsDataset():
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
         self.scale = 0.00392156862745098
 
-        if part_sample < 1.0 and partition == 'train':
-            print(f"Training on {100 * part_sample:.2f}% of chunks")
+        if part_sample < 1.0 and (partition == 'train'): # or partition == 'val'):
+            print(f"{partition} using {100 * part_sample:.2f}% of chunks")
             new_len = round(part_sample * len(self.samples))
             new_indexes = random.sample(list(range(len(self.samples))), new_len)
             self.samples = [self.samples[i] for i in new_indexes]
             self.labels = [self.labels[i] for i in new_indexes]
 
-            concat_labels = np.array(self.labels).flatten()
-            print(f"Class counts after sampling: {np.bincount(concat_labels)}")
+        if partition != 'inference':
+            concat_labels = np.array(self.labels)
+            if self.is_multilabel:
+                cls_cnts = concat_labels.sum(axis=(0, 1))
+            else:
+                cls_cnts = np.bincount(concat_labels.flatten())
+            print(f"{partition} class counts: {cls_cnts}")
 
 
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
@@ -129,7 +135,7 @@ class ClsDataset():
             label = self.proc_target(label)
         if self.partition == 'train':
             return outputs, label
-        elif self.partition == "val":
+        elif self.partition == "val" or self.partition == 'test':
             return outputs, label, names
         else:
             return outputs, names
@@ -166,16 +172,19 @@ def collate_fn_inference(batch):
 
 if __name__ == "__main__":
     import yaml
-    with open('configs/ahen/mosquitos.yaml', 'r') as f:
+    # with open('/home/petr/video_understanding/configs/base_runs/worms_vjepa.yaml', 'r') as f:
+    with open('/home/petr/video_understanding/configs/base_runs/monkeys.yaml', 'r') as f:
         cfg = yaml.safe_load(f)
-    ds = ClsDataset(partition='train', predict_per_item=16, num_classes=7, **cfg['data'])
+    ds = ClsDataset(partition='val', predict_per_item=64, num_classes=5, **cfg['data'])
+    outputs, label, names = ds[0]
+    print(outputs.shape)
     # print(set([len(x) for x in ds.labels]))
     # for i in range(len(ds)):
     #     if len(ds.labels[i]) == 15:
     #         print(i, ds.samples[i], get_frame_count(os.path.join(ds.prefix, ds.samples[i][0])), len(ds.h['labels'][ds.samples[i][0]]))
 
-    for el in ds.h['labels'].keys():
-        a = get_frame_count(os.path.join(ds.prefix, el))
-        b = len(ds.h['labels'][el])
-        if a != b:
-            print(f"{el} true: {a}, json: {b}")
+    # for el in ds.h['labels'].keys():
+    #     a = get_frame_count(os.path.join(ds.prefix, el))
+    #     b = len(ds.h['labels'][el])
+    #     if a != b:
+    #         print(f"{el} true: {a}, json: {b}")

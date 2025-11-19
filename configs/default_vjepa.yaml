@@ -22,10 +22,12 @@ training:
   weight_decay: 0.1
   label_smoothing: 0.1
   compile: true
+  patience: null
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0
 device: "cuda"
+starting_checkpoint: null
 wandb:
   key: dde17687b4b84ba8171dfede64d865243be41a0e
   entity: sposiboh

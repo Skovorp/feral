@@ -52,7 +52,7 @@ def main(cfg):
         mode='disabled' if cfg['run_name'] == 'debug' else 'online'
     )
 
-    if 'train' in labels_json['splits']:
+    if 'train' in labels_json['splits'] and len(labels_json['splits']['train']) > 0:
         train_dataset = ClsDataset(partition='train', model_name=cfg['model_name'],
                                 num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         train_loader = DataLoader(train_dataset, shuffle=True, pin_memory=True, drop_last=True, persistent_workers=cfg['training']['num_workers'] > 0,
@@ -62,7 +62,7 @@ def main(cfg):
         print("No train dataset")
         train_loader = None
     
-    if 'val' in labels_json['splits']:
+    if 'val' in labels_json['splits'] and len(labels_json['splits']['val']) > 0:
         val_dataset = ClsDataset(partition='val', model_name=cfg['model_name'], 
                                 num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         val_loader = DataLoader(val_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
@@ -72,7 +72,7 @@ def main(cfg):
         print("No val dataset")
         val_loader = None
     
-    if 'test' in labels_json['splits']:
+    if 'test' in labels_json['splits'] and len(labels_json['splits']['test']) > 0:
         test_dataset = ClsDataset(partition='test', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         test_loader = DataLoader(test_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,
@@ -82,7 +82,7 @@ def main(cfg):
         print("No test dataset")
         test_loader = None
         
-    if 'inference' in labels_json['splits']:
+    if 'inference' in labels_json['splits'] and len(labels_json['splits']['inference']) > 0:
         inference_dataset = ClsDataset(partition='inference', model_name=cfg['model_name'], 
                             num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['data'])
         inference_loader = DataLoader(inference_dataset, shuffle=False, pin_memory=True, drop_last=False, persistent_workers=cfg['training']['num_workers'] > 0,

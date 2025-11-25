@@ -35,7 +35,9 @@ def get_weights(json_data, weight_type, device):
     elif len(arr.shape) == 2:
         freqs = torch.tensor(arr.mean(0))
         ratio = ((1 - freqs) / freqs).to(device)    
-    assert freqs.min().item() > 0, f"Some classes don't have any examples. Class frequencies: {freqs}"
+    if freqs.min().item() <= 0: 
+        print(f"!!! Some classes don't have any examples. Class frequencies: {freqs}")
+        ratio = torch.clamp(ratio, max=1000000.0)
         
     if weight_type == 'inv_freq':
         return ratio

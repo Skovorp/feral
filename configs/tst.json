@@ -1,0 +1,26 @@
+{
+    "is_multilabel": true,
+    "class_names": {
+      "0": "contact",
+      "1": "attempt",
+      "2": "flight",
+      "3": "kicking",
+      "4": "genital_contact",
+      "5": "mating"
+    },
+    "labels": {
+      "035FQHMNRk.mp4": [
+        [0,0,1,0,0,0],
+        [1,0,0,0,0,0],
+        [1,1,0,0,0,0],
+        [0,0,0,0,0,0]
+      ]
+    },
+    "splits": {
+      "train": ["035FQHMNRk.mp4"],
+      "val": [],
+      "test": [],
+      "inference": ["035FQHMNRk.mp4"]
+    }
+  }
+  

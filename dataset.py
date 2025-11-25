@@ -40,7 +40,7 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
 #     vr = VideoReader(video_path)
 #     return len(vr)
 
-def get_frame_count(path: str) -> int | None:
+def get_frame_count(path: str):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Video not found: {path}")
     cap = cv2.VideoCapture(path)

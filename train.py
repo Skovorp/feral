@@ -166,7 +166,8 @@ def main(cfg):
                 optimizer.step()
                 lr_scheduler.step()
                 if model_ema is not None:
-                    model_ema.update(model)
+                    model_to_update = model._orig_mod if hasattr(model, '_orig_mod') else model
+                    model_ema.update(model_to_update)
                 wandb.log({
                     'batch_loss': loss.item(), 
                     'lr': lr_scheduler.get_last_lr()[0]

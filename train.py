@@ -13,7 +13,7 @@ import numpy as np
 import random
 from metrics import generate_empty_logits, ensemble_predictions
 from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
-from utils import prep_for_answers, get_weights
+from utils import prep_for_answers, get_weights, save_model
 from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 import sys
@@ -184,9 +184,7 @@ def main(cfg):
             wandb.log(logs)
             
             if val_loader is None:
-                if hasattr(model, '_orig_mod'):
-                    model = model._orig_mod
-                torch.save(model.state_dict(), best_checkpoint_path)
+                save_model(model, best_checkpoint_path)
                 print(f"Epoch {epoch}: Saved model")
                 continue
 
@@ -242,18 +240,12 @@ def main(cfg):
             val_map = logs['val_frame_level_map']
             ema_map = logs.get('ema_val_frame_level_map', -2)
             if val_map > ema_map and val_map > best_map:
-                m = model
-                if hasattr(m, '_orig_mod'):
-                    m = m._orig_mod
-                torch.save(m.state_dict(), best_checkpoint_path)
+                save_model(model, best_checkpoint_path)
                 best_map = val_map
                 epochs_without_updates = 0  
                 print(f"Epoch {epoch}: Saved base model checkpoint with val_frame_level_map={val_map:.4f}")
             elif model_ema is not None and ema_map > val_map and ema_map > best_map:
-                m = model_ema.ema
-                if hasattr(m, '_orig_mod'):
-                    m = m._orig_mod
-                torch.save(m.state_dict(), best_checkpoint_path)
+                save_model(model_ema.ema, best_checkpoint_path)
                 best_map = ema_map
                 epochs_without_updates = 0
                 print(f"Epoch {epoch}: Saved EMA model checkpoint with ema_val_frame_level_map={ema_map:.4f}")

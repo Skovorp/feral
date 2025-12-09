@@ -107,5 +107,11 @@ def suggested_num_workers():
             max_num_worker_suggest = cpu_count
     return max_num_worker_suggest
 
+def save_model(model, path):
+    m = model
+    if hasattr(m, '_orig_mod'):
+        m = m._orig_mod
+    torch.save(m.state_dict(), path)
+
 if __name__ == "__main__":
     print(next_nonzero_index([1., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0]))

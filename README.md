@@ -55,9 +55,11 @@ pip install -r requirements.txt
 ```
 
 ### Requirements
+- **Linux. To run on Windows, try this fix: https://github.com/Skovorp/feral/issues/11#issue-3769698588**
 - Python ≥ 3.10  
 - PyTorch 2.4 + CUDA 12.4  
-- NVIDIA GPU (≥ 24 GB VRAM recommended) 
+- NVIDIA GPU (≥ 24 GB VRAM recommended)
+
 
 ## Dataset Preparation
 

@@ -214,3 +214,5 @@ answers/
 wandb/
 __pycache__/
 notebooks/
+
+.DS_Store

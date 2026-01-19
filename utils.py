@@ -24,16 +24,36 @@ def prep_for_answers(outputs, targets, names=None):
         assert len(outputs) == len(targets), f"len(outputs) == len(targets). got {len(outputs)} == {len(targets)}"
         return list(zip(outputs, targets))
     
+def get_class_frequencies(labels_arr, num_classes=None):
+    """Calculate class frequencies from a labels array.
+    
+    Args:
+        labels_arr: numpy array of shape (N,) for single-label or (N, num_classes) for multi-label
+        num_classes: number of classes (required for single-label to ensure all classes are counted)
+    
+    Returns:
+        numpy array of class frequencies
+    """
+    if len(labels_arr.shape) == 1:
+        # Single-label: count occurrences
+        if num_classes is None:
+            num_classes = int(labels_arr.max()) + 1
+        freqs = np.bincount(labels_arr.flatten().astype(int), minlength=num_classes) / labels_arr.size
+    else:
+        # Multi-label: mean across samples
+        freqs = labels_arr.mean(axis=0)
+    return freqs
+
 def get_weights(json_data, weight_type, device):
     assert weight_type is None or weight_type in ('inv_freq', 'inv_freq_sqrt'), "weight_type should be 'inv_freq', 'inv_freq_sqrt' or None"
     if weight_type is None:
         return None 
     arr = np.concatenate([json_data['labels'][x] for x in json_data['splits']['train']])
+    freqs = torch.tensor(get_class_frequencies(arr))
+    
     if len(arr.shape) == 1:
-        freqs = torch.tensor(np.bincount(arr) / arr.shape)
         ratio = (1.0 / freqs).to(device)
     elif len(arr.shape) == 2:
-        freqs = torch.tensor(arr.mean(0))
         ratio = ((1 - freqs) / freqs).to(device)    
     if freqs.min().item() <= 0: 
         print(f"!!! Some classes don't have any examples. Class frequencies: {freqs}")

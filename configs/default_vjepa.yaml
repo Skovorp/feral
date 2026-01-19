@@ -12,6 +12,7 @@ data:
   resize_to: 256
   do_aa: true
   part_sample: 1.0
+  subsample_keep_rare_threshold: null
 training:
   epochs: 10
   train_bs: 4

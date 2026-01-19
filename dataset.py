@@ -14,6 +14,7 @@ import cv2
 import json
 import traceback
 import random
+from utils import get_class_frequencies
 
 def read_range_video_decord(path, frames):
     vr = VideoReader(path)
@@ -51,7 +52,9 @@ def get_frame_count(path: str):
         cap.release()
 
 class ClsDataset():
-    def __init__(self, partition, label_json, do_aa, predict_per_item, num_classes, prefix, resize_to, chunk_shift, chunk_length, chunk_step, part_sample=1.0, **kwargs):
+    def __init__(self, partition, label_json, do_aa, predict_per_item, 
+                 num_classes, prefix, resize_to, chunk_shift, chunk_length, 
+                 chunk_step, part_sample=1.0, subsample_keep_rare_threshold=None, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -73,11 +76,37 @@ class ClsDataset():
         self.scale = 0.00392156862745098
 
         if part_sample < 1.0 and (partition == 'train'): # or partition == 'val'):
-            print(f"{partition} using {100 * part_sample:.2f}% of chunks")
-            new_len = round(part_sample * len(self.samples))
-            new_indexes = random.sample(list(range(len(self.samples))), new_len)
-            self.samples = [self.samples[i] for i in new_indexes]
-            self.labels = [self.labels[i] for i in new_indexes]
+            if subsample_keep_rare_threshold is None:
+                print(f"{partition} using {100 * part_sample:.2f}% of chunks")
+                new_len = round(part_sample * len(self.samples))
+                new_indexes = random.sample(list(range(len(self.samples))), new_len)
+                self.samples = [self.samples[i] for i in new_indexes]
+                self.labels = [self.labels[i] for i in new_indexes]
+            else:
+                all_labels = np.array(self.labels)
+                flat_labels = all_labels.reshape(-1) if not self.is_multilabel else all_labels.reshape(-1, all_labels.shape[-1])
+                class_freqs = get_class_frequencies(flat_labels, num_classes=self.num_classes)
+                rare_classes = np.where(class_freqs < subsample_keep_rare_threshold)[0]
+                print(f"Rare class indexes (<{subsample_keep_rare_threshold * 100:.2f}%): {rare_classes.tolist()}. Class frequencies: {class_freqs}")
+                
+                # Vectorized: find which chunks contain any rare class
+                if self.is_multilabel:
+                    has_rare = all_labels[:, :, rare_classes].any(axis=(1, 2))
+                else:
+                    has_rare = np.isin(all_labels, rare_classes).any(axis=1)
+                
+                # Keep all rare, sample from common to reach target
+                rare_idx = np.where(has_rare)[0]
+                common_idx = np.where(~has_rare)[0]
+                expected_total = round(part_sample * len(self.samples))
+                assert len(rare_idx) <= expected_total, f"Found {len(rare_idx)} rare chunks, more than the expected total {expected_total}"
+                
+                sampled_common = np.random.choice(common_idx, expected_total - len(rare_idx), replace=False)
+                final_idx = np.concatenate([rare_idx, sampled_common])
+                np.random.shuffle(final_idx)
+                print(f"{partition} keeping {len(rare_idx)} rare + {len(sampled_common)} common = {len(final_idx)} chunks")
+                self.samples = [self.samples[i] for i in final_idx]
+                self.labels = [self.labels[i] for i in final_idx]
 
         if partition != 'inference':
             concat_labels = np.array(self.labels)

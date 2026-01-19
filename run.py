@@ -23,6 +23,12 @@ if __name__ == '__main__':
         default=None,
         help="Optional fraction (0-1) that reduces the number of samples in the train dataset. E.g. 0.5 keeps 50% of training samples."
     )
+    parser.add_argument(
+        '--subsample_keep_rare_threshold',
+        type=float,
+        default=None,
+        help="When subsampling, keep all chunks with rare behaviors (below this frequency threshold) and sample the rest randomly. E.g. 0.01 keeps behaviors appearing in <1%% of frames."
+    )
     args = parser.parse_args()
 
     prefix_path = args.video_folder
@@ -48,6 +54,7 @@ if __name__ == '__main__':
         if not (0.0 <= part_subsample <= 1.0):
             raise ValueError(f"--part_subsample must be between 0 and 1, got {part_subsample}")
         cfg['data']['part_sample'] = part_subsample
+    cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
 
     res = input('\nDo you want logs for your run to be on a community Weights & Biases account? No setup required, but everyone will be able to see logs for your run. You can also create your personal project on WandB and log there. Type "open" or "personal": ').strip().lower()
     if res == "open":

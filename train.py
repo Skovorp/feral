@@ -273,6 +273,11 @@ def main(cfg):
     else:
         test_checkpoint_path = cfg['starting_checkpoint']
     
+    if test_checkpoint_path is None:
+        raise ValueError(
+            "No checkpoint available for test/inference. "
+            "When running without a train split, you must provide a checkpoint via --checkpoint / -c"
+        )
     best_model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
     best_model_state = torch.load(test_checkpoint_path, map_location="cpu")
     best_model.load_state_dict(best_model_state)

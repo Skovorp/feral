@@ -96,9 +96,6 @@ def main(cfg):
         model = HFModel(model_name=cfg['model_name'], num_classes=num_classes, predict_per_item=cfg['predict_per_item'], **cfg['model'])
         model.to(device)
 
-        if cfg['training']['compile']:
-            model = torch.compile(model, mode="max-autotune", dynamic=True)
-
         if cfg['ema_decay'] is not None:
             model_ema = ModelEma(
                 model,
@@ -107,6 +104,9 @@ def main(cfg):
             )
         else:
             model_ema = None
+
+        if cfg['training']['compile']:
+            model = torch.compile(model, mode="max-autotune", dynamic=True)
 
         tot = 0
         for el in model.state_dict().values():
@@ -166,7 +166,8 @@ def main(cfg):
                 optimizer.step()
                 lr_scheduler.step()
                 if model_ema is not None:
-                    model_ema.update(model)
+                    model_to_update = model._orig_mod if hasattr(model, '_orig_mod') else model
+                    model_ema.update(model_to_update)
                 wandb.log({
                     'batch_loss': loss.item(), 
                     'lr': lr_scheduler.get_last_lr()[0]

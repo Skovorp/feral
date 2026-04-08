@@ -114,7 +114,6 @@ def ensemble_predictions(ans, logits):
             if sum_weights[fn][i] > 0:
                 logits[fn][i, :] = logits[fn][i, :] / sum_weights[fn][i]
             else:
-                # assert left_ind[i] < i and i < right_ind[i], (left_ind[i], i, right_ind[i], sum_weights[fn][i - 5 : i + 5])
                 if left_ind[i] == -1 and right_ind[i] == -1:
                     continue
                 elif right_ind[i] == -1:
@@ -245,7 +244,6 @@ def fig2img(fig):
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
     preds = np.array([x[-2] for x in ans])
     targets = np.array([x[-1] for x in ans]).astype(int)
-    # targets = targets.argmax(1)
 
     aps = []
     res = {}

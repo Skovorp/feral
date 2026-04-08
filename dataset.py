@@ -32,10 +32,6 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
-# def get_frame_count(video_path):
-#     vr = VideoReader(video_path)
-#     return len(vr)
-
 def get_frame_count(path: str):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Video not found: {path}")
@@ -61,16 +57,15 @@ class ClsDataset():
         
         self.parse_json(chunk_shift, chunk_length, chunk_step)
         if do_aa and self.partition == "train":
-            self.aug = TrivialAugmentWide() #AutoAugment()
+            self.aug = TrivialAugmentWide()
         else:
              self.aug = None
         
         self.resize = torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
-        # self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # smolvm
-        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
+        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
 
-        if part_sample < 1.0 and (partition == 'train'): # or partition == 'val'):
+        if part_sample < 1.0 and partition == 'train':
             if subsample_keep_rare_threshold is None:
                 print(f"{partition} using {100 * part_sample:.2f}% of chunks")
                 new_len = round(part_sample * len(self.samples))
@@ -192,23 +187,3 @@ def collate_fn_inference(batch):
     tensors, names = zip(*batch)
     tensors = torch.stack(tensors)
     return tensors, names
-
-
-if __name__ == "__main__":
-    import yaml
-    # with open('/home/petr/video_understanding/configs/base_runs/worms_vjepa.yaml', 'r') as f:
-    with open('/home/petr/video_understanding/configs/base_runs/monkeys.yaml', 'r') as f:
-        cfg = yaml.safe_load(f)
-    ds = ClsDataset(partition='val', predict_per_item=64, num_classes=5, **cfg['data'])
-    outputs, label, names = ds[0]
-    print(outputs.shape)
-    # print(set([len(x) for x in ds.labels]))
-    # for i in range(len(ds)):
-    #     if len(ds.labels[i]) == 15:
-    #         print(i, ds.samples[i], get_frame_count(os.path.join(ds.prefix, ds.samples[i][0])), len(ds.h['labels'][ds.samples[i][0]]))
-
-    # for el in ds.h['labels'].keys():
-    #     a = get_frame_count(os.path.join(ds.prefix, el))
-    #     b = len(ds.h['labels'][el])
-    #     if a != b:
-    #         print(f"{el} true: {a}, json: {b}")

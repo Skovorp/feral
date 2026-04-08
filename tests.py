@@ -32,12 +32,8 @@ class TestGetFrameIds(unittest.TestCase):
         expected = [[0, 1, 2]]
         self.assertEqual(result, expected)
 
-    def test_no_chunks(self):
+    def test_no_chunks_two_frames(self):
         result = get_frame_ids(total_frames=2, chunk_shift=1, chunk_length=3, chunk_step=1)
-        self.assertEqual(result, [])
-
-    def test_no_chunks(self):
-        result = get_frame_ids(total_frames=100, chunk_shift=1, chunk_length=3, chunk_step=1)
         self.assertEqual(result, [])
 
 if __name__ == '__main__':

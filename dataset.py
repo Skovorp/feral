@@ -1,15 +1,10 @@
-import pandas as pd
 import torchvision
-from transformers import AutoProcessor
 import os
-import decord
-from decord import VideoReader, cpu
+from decord import VideoReader
 import torch
-from torchvision.transforms.v2 import AutoAugment, TrivialAugmentWide
+from torchvision.transforms.v2 import TrivialAugmentWide
 from torch.nn.functional import one_hot
 import numpy as np
-from safetensors import safe_open
-import re
 import cv2
 import json
 import traceback

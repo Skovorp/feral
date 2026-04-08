@@ -5,7 +5,6 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
-import json
 import matplotlib.cm as cm
 import PIL
 import cv2

@@ -56,20 +56,36 @@ if __name__ == '__main__':
         cfg['data']['part_sample'] = part_subsample
     cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
 
-    res = input('\nDo you want logs for your run to be on a community Weights & Biases account? No setup required, but everyone will be able to see logs for your run. You can also create your personal project on WandB and log there. Type "open" or "personal": ').strip().lower()
+    SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
+    SHARED_WANDB_ENTITY = "sposiboh"
+    SHARED_WANDB_PROJECT = "feral_public"
+
+    res = input(
+        '\nWeights & Biases logging options:\n'
+        '  open     - log to a shared community W&B account (no setup, public)\n'
+        '  personal - log to your own W&B project\n'
+        '  skip     - no W&B, metrics printed to the command line only\n'
+        'Type "open", "personal", or "skip": '
+    ).strip().lower()
+
     if res == "open":
         print("Using shared account")
-        wandb.login(key=cfg['wandb']['key'])
+        wandb.login(key=SHARED_WANDB_KEY)
+        cfg['wandb'] = {'entity': SHARED_WANDB_ENTITY, 'project': SHARED_WANDB_PROJECT}
     elif res == "personal":
         key = input('Paste your wandb api_key: ').strip()
         wandb.login(key=key)
         link = input("paste link to the project where you want to log your runs: ")
         link = urlparse(link)
-        assert link.netloc == f'wandb.ai', "should be link to wandb.ai, got {link.netloc}"
-        cfg['wandb']['entity'] = link.path.split('/')[1]
-        cfg['wandb']['project'] = link.path.split('/')[2]
-        print(f"Entity: {cfg['wandb']['entity']} project: {cfg['wandb']['project']}")
+        assert link.netloc == 'wandb.ai', f"should be link to wandb.ai, got {link.netloc}"
+        entity = link.path.split('/')[1]
+        project = link.path.split('/')[2]
+        cfg['wandb'] = {'entity': entity, 'project': project}
+        print(f"Entity: {entity} project: {project}")
+    elif res == "skip":
+        print("Skipping W&B; metrics will be printed to stdout only.")
+        cfg.pop('wandb', None)
     else:
-        print(f'Should be "open" or "personal". Got {res}')
+        raise SystemExit(f'Should be "open", "personal", or "skip". Got {res!r}')
 
     main(cfg)

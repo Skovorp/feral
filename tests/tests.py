@@ -1,6 +1,4 @@
-import unittest
 
-from dataset import get_frame_ids  
 
 class TestGetFrameIds(unittest.TestCase):
     def test_every_frame(self):

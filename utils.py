@@ -132,5 +132,21 @@ def save_model(model, path):
         m = m._orig_mod
     torch.save(m.state_dict(), path)
 
+
+def pick_and_save_best(model, model_ema, val_map, ema_map, best_map, path):
+    """Decide whether to save the base model, the EMA model, or neither.
+
+    Returns (new_best_map, saved). `saved` is one of 'base', 'ema', None.
+    The caller is responsible for tracking patience / early stopping based on
+    whether `saved` is None.
+    """
+    if val_map > ema_map and val_map > best_map:
+        save_model(model, path)
+        return val_map, 'base'
+    if model_ema is not None and ema_map > val_map and ema_map > best_map:
+        save_model(model_ema.ema, path)
+        return ema_map, 'ema'
+    return best_map, None
+
 if __name__ == "__main__":
     print(next_nonzero_index([1., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0]))

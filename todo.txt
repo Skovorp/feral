@@ -1,4 +1,3 @@
-1. pin versions in requirements
 3. windows support (https://github.com/Skovorp/feral/issues/11)
 4. docstrings or type hints
 5. test coverage for:
@@ -25,6 +24,7 @@
     26. add support for vjepa5.1 and videoprism
 
 Done:
+1. pin versions in requirements
 2. split train.py to smaller modules 
 11. no command line prompts
 14. move the video processing script to repo?

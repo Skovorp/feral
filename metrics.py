@@ -10,9 +10,12 @@ import PIL
 import cv2
 import os
 import traceback
+import logging
 
 from utils import last_nonzero_index, next_nonzero_index
 from dataset import get_frame_count
+
+logger = logging.getLogger(__name__)
 
 def calc_frame_level_map(ans, labels_json, partition):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
@@ -279,7 +282,7 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
         video_path = os.path.join(prefix, fn)
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            print(f"Could not open {video_path}")
+            logger.warning("Could not open %s", video_path)
             continue
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))

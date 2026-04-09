@@ -9,7 +9,10 @@ import cv2
 import json
 import traceback
 import random
+import logging
 from utils import get_class_frequencies
+
+logger = logging.getLogger(__name__)
 
 def read_range_video_decord(path, frames):
     vr = VideoReader(path)
@@ -67,7 +70,7 @@ class ClsDataset():
 
         if part_sample < 1.0 and partition == 'train':
             if subsample_keep_rare_threshold is None:
-                print(f"{partition} using {100 * part_sample:.2f}% of chunks")
+                logger.info("%s using %.2f%% of chunks", partition, 100 * part_sample)
                 new_len = round(part_sample * len(self.samples))
                 new_indexes = random.sample(list(range(len(self.samples))), new_len)
                 self.samples = [self.samples[i] for i in new_indexes]
@@ -77,7 +80,8 @@ class ClsDataset():
                 flat_labels = all_labels.reshape(-1) if not self.is_multilabel else all_labels.reshape(-1, all_labels.shape[-1])
                 class_freqs = get_class_frequencies(flat_labels, num_classes=self.num_classes)
                 rare_classes = np.where(class_freqs < subsample_keep_rare_threshold)[0]
-                print(f"Rare class indexes (<{subsample_keep_rare_threshold * 100:.2f}%): {rare_classes.tolist()}. Class frequencies: {class_freqs}")
+                logger.info("Rare class indexes (<%.2f%%): %s. Class frequencies: %s",
+                            subsample_keep_rare_threshold * 100, rare_classes.tolist(), class_freqs)
                 
                 # Vectorized: find which chunks contain any rare class
                 if self.is_multilabel:
@@ -94,7 +98,8 @@ class ClsDataset():
                 sampled_common = np.random.choice(common_idx, expected_total - len(rare_idx), replace=False)
                 final_idx = np.concatenate([rare_idx, sampled_common])
                 np.random.shuffle(final_idx)
-                print(f"{partition} keeping {len(rare_idx)} rare + {len(sampled_common)} common = {len(final_idx)} chunks")
+                logger.info("%s keeping %d rare + %d common = %d chunks",
+                            partition, len(rare_idx), len(sampled_common), len(final_idx))
                 self.samples = [self.samples[i] for i in final_idx]
                 self.labels = [self.labels[i] for i in final_idx]
 
@@ -104,7 +109,7 @@ class ClsDataset():
                 cls_cnts = concat_labels.sum(axis=(0, 1))
             else:
                 cls_cnts = np.bincount(concat_labels.flatten())
-            print(f"{partition} class counts: {cls_cnts}")
+            logger.info("%s class counts: %s", partition, cls_cnts)
 
 
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
@@ -163,13 +168,13 @@ class ClsDataset():
         try:
             return self.get_item_simple(index)
         except Exception:
-            print(f"Error loading index {index}:\n{traceback.format_exc()}")
+            logger.warning("Error loading index %d:\n%s", index, traceback.format_exc())
             for _ in range(3):
                 alt_index = np.random.randint(0, len(self))
                 try:
                     return self.get_item_simple(alt_index)
                 except Exception:
-                    print(f"Error loading index {alt_index}:\n{traceback.format_exc()}")
+                    logger.warning("Error loading index %d:\n%s", alt_index, traceback.format_exc())
             raise RuntimeError(f"Failed to load sample after multiple retries.\nLast error:\n{traceback.format_exc()}")
 
     

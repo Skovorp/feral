@@ -13,7 +13,15 @@ from metrics import generate_empty_logits, ensemble_predictions
 from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
 import sys
 import os
+import logging
 import warnings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings(
     "ignore",
@@ -81,12 +89,12 @@ def main(cfg):
                 **calculate_multiclass_metrics(answers, class_names, 'train'),
                 'train_loss': train_loss,
             }
-            print(logs)
+            logger.info("%s", logs)
             wandb.log(logs)
 
             if val_loader is None:
                 save_model(model, best_checkpoint_path)
-                print(f"Epoch {epoch}: Saved model")
+                logger.info("Epoch %d: Saved model", epoch)
                 continue
 
             answers, val_loss = evaluate(
@@ -118,7 +126,7 @@ def main(cfg):
                     'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
                 }
                 logs.update(ema_logs)
-            print(logs)
+            logger.info("%s", logs)
             wandb.log(logs)
 
             # save best model
@@ -129,19 +137,19 @@ def main(cfg):
             )
             if saved == 'base':
                 epochs_without_updates = 0
-                print(f"Epoch {epoch}: Saved base model checkpoint with val_frame_level_map={val_map:.4f}")
+                logger.info("Epoch %d: Saved base model checkpoint with val_frame_level_map=%.4f", epoch, val_map)
             elif saved == 'ema':
                 epochs_without_updates = 0
-                print(f"Epoch {epoch}: Saved EMA model checkpoint with ema_val_frame_level_map={ema_map:.4f}")
+                logger.info("Epoch %d: Saved EMA model checkpoint with ema_val_frame_level_map=%.4f", epoch, ema_map)
             else:
                 epochs_without_updates += 1
-                print(f"Epoch {epoch}: Didnt improve for {epochs_without_updates} epochs")
+                logger.info("Epoch %d: Didnt improve for %d epochs", epoch, epochs_without_updates)
                 if cfg['training']['patience'] is not None and epochs_without_updates >= cfg['training']['patience']:
-                    print(f"Epoch {epoch}: Early stopping: no improvement for {cfg['training']['patience']} epochs, stopping training.")
+                    logger.info("Epoch %d: Early stopping: no improvement for %d epochs, stopping training.", epoch, cfg['training']['patience'])
                     break
-        
-        print("Finished training")
-        print(f"Best checkpoint: {best_checkpoint_path}. best_map: {best_map:4f}")
+
+        logger.info("Finished training")
+        logger.info("Best checkpoint: %s. best_map: %.4f", best_checkpoint_path, best_map)
         del model 
         del model_ema
         del optimizer
@@ -150,7 +158,7 @@ def main(cfg):
     if inference_loader is None and test_loader is None:
         return
     
-    print("Loading model for test/inference")
+    logger.info("Loading model for test/inference")
     if train_loader is not None:
         test_checkpoint_path = best_checkpoint_path
     else:
@@ -159,7 +167,7 @@ def main(cfg):
     best_model = load_model_from_checkpoint(cfg, num_classes, device, test_checkpoint_path)
 
     if test_loader is not None:
-        print("Running test...")
+        logger.info("Running test...")
         answers, _ = evaluate(
             best_model, test_loader,
             num_classes=num_classes, is_multilabel=labels_json['is_multilabel'],
@@ -188,11 +196,11 @@ def main(cfg):
             'test_frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
             'test_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
         }
-        print(logs)
+        logger.info("%s", logs)
         wandb.log(logs)
 
     if inference_loader is not None:
-        print("Running inference...")
+        logger.info("Running inference...")
         answers = run_inference(
             best_model, inference_loader,
             is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches')

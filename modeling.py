@@ -1,3 +1,5 @@
+import logging
+
 import torch
 from torch.optim import AdamW
 from timm.utils import ModelEma
@@ -6,6 +8,8 @@ from transformers import get_cosine_schedule_with_warmup
 
 from model import HFModel
 from utils import get_weights
+
+logger = logging.getLogger(__name__)
 
 
 def build_model(cfg, num_classes, device, *, with_ema=True):
@@ -30,7 +34,7 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
         model_ema = ModelEma(model, decay=cfg['ema_decay'], device=device)
 
     n_params = sum(el.numel() for el in model.state_dict().values())
-    print(f"parameters: {n_params:_d}")
+    logger.info("parameters: %s", f"{n_params:_d}")
 
     return model, model_ema
 

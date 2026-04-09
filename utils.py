@@ -1,4 +1,7 @@
 import torch
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np
 import random
 import os
@@ -55,7 +58,7 @@ def get_weights(json_data, weight_type, device):
     elif len(arr.shape) == 2:
         ratio = ((1 - freqs) / freqs).to(device)    
     if freqs.min().item() <= 0: 
-        print(f"!!! Some classes don't have any examples. Class frequencies: {freqs}")
+        logger.warning("Some classes don't have any examples. Class frequencies: %s", freqs)
         ratio = torch.clamp(ratio, max=1000000.0)
         
     if weight_type == 'inv_freq':

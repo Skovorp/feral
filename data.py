@@ -1,6 +1,10 @@
+import logging
+
 from torch.utils.data import DataLoader
 
 from dataset import ClsDataset, collate_fn_val, collate_fn_inference
+
+logger = logging.getLogger(__name__)
 
 
 _PARTITION_SPECS = {
@@ -28,7 +32,7 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
     for partition, spec in _PARTITION_SPECS.items():
         split = labels_json['splits'].get(partition)
         if not split:
-            print(f"No {partition} dataset")
+            logger.info("No %s dataset", partition)
             continue
 
         dataset = ClsDataset(
@@ -59,5 +63,5 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
         datasets[partition] = dataset
         loaders[partition] = loader
 
-    print(f"Dataset is multilabel: {labels_json['is_multilabel']}")
+    logger.info("Dataset is multilabel: %s", labels_json['is_multilabel'])
     return datasets, loaders

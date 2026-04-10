@@ -46,17 +46,15 @@ def get_frame_count(path: str):
         cap.release()
 
 class ClsDataset():
-    def __init__(self, partition, label_json, do_aa, predict_per_item, 
-                 num_classes, prefix, resize_to, chunk_shift, chunk_length, 
+    def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
+                 num_classes, prefix, resize_to, chunk_shift, chunk_length,
                  chunk_step, part_sample=1.0, subsample_keep_rare_threshold=None, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
         self.num_classes = num_classes
         self.is_multilabel = None
-        
-        with open(label_json, 'r') as f:
-            self.json_data = json.load(f)
+        self.json_data = label_json_dict
         
         self.parse_json(chunk_shift, chunk_length, chunk_step)
         if do_aa and self.partition == "train":
@@ -138,16 +136,12 @@ class ClsDataset():
             target = one_hot(target, self.num_classes)
         target = target.float() 
         return target
-    
-    def proc_names(self, sample):
-        if self.predict_per_item > 1:
-            sample = [f"{sample}_{i}" for i in range(self.predict_per_item)]
-        return sample
 
     def get_video(self, i):
         fn, frames = self.samples[i]
         pth = os.path.join(self.prefix, fn)
-        return read_range_video_decord(pth, frames), [f"{fn}_globalind_{frames[i]}_chunkind_{i}" for i in range(len(frames))]
+        # names are (filename as in labels.json, index of a frame within the video, index of a frame within a chunk)
+        return read_range_video_decord(pth, frames), [(fn, frames[i], i) for i in range(len(frames))]
     
     def get_item_simple(self, index):
         video, names = self.get_video(index)

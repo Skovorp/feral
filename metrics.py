@@ -1,7 +1,6 @@
 import numpy as np
 import json 
 from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score
-import re
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
@@ -45,7 +44,7 @@ def calc_frame_level_map(ans, labels_json, partition):
         res[f'ap_{cls_name}'] = ap 
     return sum(aps) / len(aps)
 
-def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
 
@@ -71,8 +70,7 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
             f'{prefix}_f1': f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
         }
     else:
-        threshold = 0.85
-        pred_labels = (preds > threshold) * 1
+        pred_labels = (preds > multilabel_threshold) * 1
         target_labels = targets.astype(int)
 
         precisions = []
@@ -90,21 +88,15 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
         }
 
 def ensemble_predictions(ans, logits):
-    predict_per_item = max([int(x[0].split('_chunkind_')[1]) for x in ans]) + 1
+    predict_per_item = max(x[0][2] for x in ans) + 1
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
     # uniform weights for now
     weights = np.ones(predict_per_item)[:, None]
 
     for el in ans:
-        name = el[0]
+        fn, global_ind, chunk_ind = el[0]
         preds = np.array(el[1])
-
-        # get ind
-        match = re.search(r"([^/]+)_globalind_(\d+)_chunkind_(\d+)", name)
-        fn = match.group(1)
-        global_ind = int(match.group(2))
-        chunk_ind = int(match.group(3))
 
         logits[fn][global_ind, :] += preds * weights[chunk_ind, 0]
         sum_weights[fn][global_ind] += weights[chunk_ind, 0]

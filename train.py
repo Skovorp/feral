@@ -1,7 +1,7 @@
 from data import build_datasets_and_loaders
 from loops import train_one_epoch, evaluate, run_inference
 from modeling import build_model, build_training_objects, load_model_from_checkpoint
-from utils import save_model, pick_and_save_best
+from utils import save_model, pick_and_save_best, validate_labels_json, check_environment
 import yaml
 import torch
 import wandb
@@ -37,10 +37,16 @@ def _str_now():
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
 def main(cfg):
+    check_environment(compile_enabled=cfg['training']['compile'])
+
     with open(cfg['data']['label_json'], 'r') as f:
         labels_json = json.load(f)
+
+    validate_labels_json(labels_json, cfg['data'].get('prefix'))
+
     class_names = {int(x): y for x, y in labels_json['class_names'].items()}
     num_classes = len(class_names)
+    model_save_metadata = {'class_names': class_names, 'is_multilabel': labels_json['is_multilabel']}
 
     os.makedirs("answers", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
@@ -93,7 +99,7 @@ def main(cfg):
             wandb.log(logs)
 
             if val_loader is None:
-                save_model(model, best_checkpoint_path)
+                save_model(model, best_checkpoint_path, model_save_metadata)
                 logger.info("Epoch %d: Saved model", epoch)
                 continue
 
@@ -112,7 +118,7 @@ def main(cfg):
                 json.dump(answers, f)
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'val'),
-                **calculate_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val'),
+                **calculate_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val', cfg['multilabel_threshold']),
                 'val_frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
                 'val_loss': val_loss,
                 'val_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
@@ -120,7 +126,7 @@ def main(cfg):
             if model_ema is not None:
                 ema_logs = {
                     **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
-                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'ema_val'),
+                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'ema_val', cfg['multilabel_threshold']),
                     'ema_val_frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
                     'ema_val_loss': ema_val_loss,
                     'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
@@ -134,6 +140,7 @@ def main(cfg):
             ema_map = logs.get('ema_val_frame_level_map', -2)
             best_map, saved = pick_and_save_best(
                 model, model_ema, val_map, ema_map, best_map, best_checkpoint_path,
+                model_save_metadata,
             )
             if saved == 'base':
                 epochs_without_updates = 0
@@ -164,7 +171,7 @@ def main(cfg):
     else:
         test_checkpoint_path = cfg['starting_checkpoint']
     
-    best_model = load_model_from_checkpoint(cfg, num_classes, device, test_checkpoint_path)
+    best_model, _checkpoint_meta = load_model_from_checkpoint(cfg, device, test_checkpoint_path, num_classes=num_classes)
 
     if test_loader is not None:
         logger.info("Running test...")
@@ -180,7 +187,7 @@ def main(cfg):
         with open(os.path.join("answers", f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
             if labels_json['is_multilabel']:
                 json.dump({
-                    'pred': {x: ((y > 0.85) * 1).tolist() for x, y in predictions.items()},
+                    'pred': {x: ((y > cfg['multilabel_threshold']) * 1).tolist() for x, y in predictions.items()},
                     'gt': {x: labels_json['labels'][x] for x, y in predictions.items()},
                     'class_names': labels_json['class_names']
                 }, f)
@@ -192,7 +199,7 @@ def main(cfg):
                 }, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'test'),
-            **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test'),
+            **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test', cfg['multilabel_threshold']),
             'test_frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
             'test_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
         }

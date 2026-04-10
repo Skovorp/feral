@@ -30,3 +30,4 @@ seed: 0
 device: "cuda"
 starting_checkpoint: null
 max_batches: null
+multilabel_threshold: 0.85

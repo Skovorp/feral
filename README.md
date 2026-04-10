@@ -55,10 +55,14 @@ pip install -r requirements.txt
 ```
 
 ### Requirements
-- **Linux. To run on Windows, try this fix: https://github.com/Skovorp/feral/issues/11#issue-3769698588**
+- **Linux, macOS, or Windows**
 - Python ≥ 3.10  
 - PyTorch 2.4 + CUDA 12.4  
-- NVIDIA GPU (≥ 24 GB VRAM recommended)
+- NVIDIA GPU with Ampere architecture or newer (compute capability ≥ 8.0, ≥ 24 GB VRAM recommended). FERAL uses bfloat16 and flash attention, which require Ampere+. Older GPUs like V100 (Volta) and T4 (Turing) — including free Google Colab T4 instances — will not work. Supported GPUs include: A100, A10, L4, L40, RTX 3000/4000/5000 series, and newer.
+
+### Windows notes
+- `triton-windows` is installed automatically via `requirements.txt` as a drop-in replacement for the official `triton` package, which has no Windows build.
+- **PyTorch 2.8–2.9 has a known bug on Windows** where `torch.compile` crashes with `OverflowError: Python int too large to convert to C long` ([pytorch#162430](https://github.com/pytorch/pytorch/issues/162430)). Use PyTorch 2.7 or ≥ 2.10 to avoid this. See [issue #11](https://github.com/Skovorp/feral/issues/11) for details.
 
 
 ## Dataset Preparation

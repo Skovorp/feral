@@ -36,10 +36,10 @@ if __name__ == '__main__':
     checkpoint_path = args.checkpoint
     part_subsample = args.part_subsample
 
-    assert os.path.exists(prefix_path), f"Prefix path does not exist: {prefix_path}"
-    assert os.path.exists(label_json_path), f"Label JSON file does not exist: {label_json_path}"
+    assert os.path.isdir(prefix_path), f"Video folder is not a directory: {prefix_path}"
+    assert os.path.isfile(label_json_path), f"Label JSON path is not a file: {label_json_path}"
     if checkpoint_path is not None:
-        assert os.path.exists(checkpoint_path), f"Checkpoint path does not exist: {checkpoint_path}"
+        assert os.path.isfile(checkpoint_path), f"Checkpoint path is not a file: {checkpoint_path}"
 
     with open('configs/default_vjepa.yaml', 'r') as f:
         cfg = yaml.safe_load(f)
@@ -50,11 +50,16 @@ if __name__ == '__main__':
     if checkpoint_path is not None:
         cfg['starting_checkpoint'] = checkpoint_path
     if part_subsample is not None:
-        part_subsample = float(part_subsample)
         if not (0.0 <= part_subsample <= 1.0):
             raise ValueError(f"--part_subsample must be between 0 and 1, got {part_subsample}")
         cfg['data']['part_sample'] = part_subsample
-    cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
+    subsample_keep_rare_threshold = args.subsample_keep_rare_threshold
+    if subsample_keep_rare_threshold is not None:
+        if part_subsample is None:
+            raise ValueError("--subsample_keep_rare_threshold requires --part_subsample to be set")
+        if not (0.0 <= subsample_keep_rare_threshold <= 1.0):
+            raise ValueError(f"--subsample_keep_rare_threshold must be between 0 and 1, got {subsample_keep_rare_threshold}")
+    cfg['data']['subsample_keep_rare_threshold'] = subsample_keep_rare_threshold
 
     SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
     SHARED_WANDB_ENTITY = "sposiboh"
@@ -78,8 +83,10 @@ if __name__ == '__main__':
         link = input("paste link to the project where you want to log your runs: ")
         link = urlparse(link)
         assert link.netloc == 'wandb.ai', f"should be link to wandb.ai, got {link.netloc}"
-        entity = link.path.split('/')[1]
-        project = link.path.split('/')[2]
+        parts = [p for p in link.path.split('/') if p]
+        assert len(parts) >= 2, f"Expected wandb.ai/<entity>/<project> URL, got: {link.path}"
+        entity = parts[0]
+        project = parts[1]
         cfg['wandb'] = {'entity': entity, 'project': project}
         print(f"Entity: {entity} project: {project}")
     elif res == "skip":

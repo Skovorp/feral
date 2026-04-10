@@ -37,7 +37,7 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
 
         dataset = ClsDataset(
             partition=partition,
-            model_name=cfg['model_name'],
+            label_json_dict=labels_json,
             num_classes=num_classes,
             predict_per_item=cfg['predict_per_item'],
             **cfg['data'],

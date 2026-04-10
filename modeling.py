@@ -39,21 +39,61 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
     return model, model_ema
 
 
-def load_model_from_checkpoint(cfg, num_classes, device, checkpoint_path):
-    """Build a fresh model and load weights from checkpoint_path. Returns model."""
+def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
+    """Build a fresh model and load weights from checkpoint_path.
+
+    Supports both new-style checkpoints (dict with 'state_dict', 'class_names',
+    'is_multilabel') and legacy checkpoints (bare state_dict).
+
+    For new-style checkpoints, num_classes is derived from the metadata and the
+    argument is ignored. For legacy checkpoints, num_classes must be provided.
+
+    Returns (model, metadata) where metadata is a dict with 'class_names' and
+    'is_multilabel', or None for legacy checkpoints.
+    """
+    raw = torch.load(checkpoint_path, map_location="cpu")
+
+    if isinstance(raw, dict) and 'state_dict' in raw:
+        state_dict = raw['state_dict']
+        metadata = {
+            'class_names': raw['class_names'],
+            'is_multilabel': raw['is_multilabel'],
+        }
+        num_classes = len(metadata['class_names'])
+    else:
+        logging.warning(
+            "Checkpoint '%s' is a legacy format (bare state_dict) with no "
+            "embedded class_names/is_multilabel. Falling back to labels_json.",
+            checkpoint_path,
+        )
+        if num_classes is None:
+            raise ValueError(
+                f"Checkpoint '{checkpoint_path}' is legacy format and num_classes was not provided."
+            )
+        state_dict = raw
+        metadata = None
+
     model = HFModel(
         model_name=cfg['model_name'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
         **cfg['model'],
     )
-    state = torch.load(checkpoint_path, map_location="cpu")
-    model.load_state_dict(state)
+    try:
+        model.load_state_dict(state_dict)
+    except RuntimeError as e:
+        logging.error(
+            "Checkpoint '%s' does not match the current model. "
+            "This usually means the checkpoint was saved from a different model "
+            "or a different number of classes.",
+            checkpoint_path,
+        )
+        raise
     model.to(device)
     if cfg['training']['compile']:
         model = torch.compile(model, mode="max-autotune", dynamic=True)
     model.eval()
-    return model
+    return model, metadata
 
 
 def build_training_objects(cfg, model, train_dataset, train_loader, labels_json, device):

@@ -1,6 +1,6 @@
 import numpy as np
 import json 
-from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
@@ -64,11 +64,16 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         pred_labels = preds.argmax(1)
         target_labels = targets
 
-        return {
-            f'{prefix}_precision': precision_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
-            f'{prefix}_recall': recall_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
-            f'{prefix}_f1': f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        }
+        per_class_f1 = f1_score(target_labels, pred_labels, labels=valid_classes, average=None)
+        res = {}
+        for cls_ind, f1_val in zip(valid_classes, per_class_f1):
+            res[f'{prefix}_f1_{class_names[cls_ind]}'] = f1_val
+
+        res[f'{prefix}_precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        return res
     else:
         pred_labels = (preds > multilabel_threshold) * 1
         target_labels = targets.astype(int)
@@ -77,15 +82,22 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         recalls = []
         f1s = []
 
+        res = {}
         for valid_class_ind in valid_classes:
-            precisions.append(precision_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-            recalls.append(recall_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-            f1s.append(f1_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-        return {
-            f'{prefix}_precision': sum(precisions) / len(precisions),
-            f'{prefix}_recall': sum(recalls) / len(recalls),
-            f'{prefix}_f1': sum(f1s) / len(f1s)
-        }
+            p = precision_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            r = recall_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            f = f1_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            precisions.append(p)
+            recalls.append(r)
+            f1s.append(f)
+            res[f'{prefix}_f1_{class_names[valid_class_ind]}'] = f
+
+        res[f'{prefix}_precision'] = sum(precisions) / len(precisions)
+        res[f'{prefix}_recall'] = sum(recalls) / len(recalls)
+        res[f'{prefix}_f1'] = sum(f1s) / len(f1s)
+        # exact match: all class predictions must match all class targets
+        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        return res
 
 def ensemble_predictions(ans, logits):
     predict_per_item = max(x[0][2] for x in ans) + 1

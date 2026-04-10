@@ -14,8 +14,6 @@ T5. test coverage for:
     - config parameters
     - benchmarks on different datasets/hardware
     26. add support for vjepa5.1 and videoprism
-27. per-class f1 
-28. add accuracy
 
 Done:
 1. pin versions in requirements
@@ -35,3 +33,5 @@ Done:
 23. add code to validate config and labels.json 
 24. what to do with torch.backends.cuda.enable_math_sdp(False)
 25. add validation for loading checkpoints
+27. per-class f1 
+28. add accuracy

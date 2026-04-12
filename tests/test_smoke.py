@@ -10,7 +10,7 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 
 
 def _build_smoke_cfg(label_json_name):
-    with open(os.path.join(REPO_ROOT, 'configs', 'default_vjepa.yaml')) as f:
+    with open(os.path.join(REPO_ROOT, 'feral', 'default_config.yaml')) as f:
         cfg = yaml.safe_load(f)
     cfg['run_name'] = 'debug'
     cfg['max_batches'] = 1

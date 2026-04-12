@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0,<77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "feral"
 version = "0.1.0"
-description = "FERAL — Frame-level Ethological Recording and Analysis Library"
+description = "FERAL: Feature Extraction for Recognition of Animal Locomotion"
 readme = "README.md"
 license = {file = "LICENSE.txt"}
 requires-python = ">=3.10"

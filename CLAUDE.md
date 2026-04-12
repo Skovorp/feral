@@ -33,5 +33,11 @@ If you need to install a new dependency *for local Mac development*, install it 
 
 
 Do not regenerate fixtures. they are already ok
-Use unittest
+Use pytest
 use twine to publish to pypi
+Dont do the following without explicit approval from me:
+- git commit
+- git push
+- publish to pypi
+- update python project information
+- Readme

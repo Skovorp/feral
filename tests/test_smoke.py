@@ -1,5 +1,6 @@
 import os
-import unittest
+
+import pytest
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -28,22 +29,18 @@ def _build_smoke_cfg(label_json_name):
     return cfg
 
 
-class TestEndToEndSmoke(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        videos_dir = os.path.join(FIXTURES_DIR, 'videos')
-        if not os.path.isdir(videos_dir) or not os.listdir(videos_dir):
-            raise unittest.SkipTest(
-                f"Synthetic fixture videos not found at {videos_dir}. "
-                f"Run: python tests/generate_synthetic_dataset.py"
-            )
-
-    def test_singlelabel_smoke(self):
-        train_main(_build_smoke_cfg('labels_singlelabel.json'))
-
-    def test_multilabel_smoke(self):
-        train_main(_build_smoke_cfg('labels_multilabel.json'))
+videos_dir = os.path.join(FIXTURES_DIR, 'videos')
+_skip_no_fixtures = pytest.mark.skipif(
+    not os.path.isdir(videos_dir) or not os.listdir(videos_dir),
+    reason=f"Synthetic fixture videos not found at {videos_dir}. Run: python tests/generate_synthetic_dataset.py",
+)
 
 
-if __name__ == '__main__':
-    unittest.main()
+@_skip_no_fixtures
+def test_singlelabel_smoke():
+    train_main(_build_smoke_cfg('labels_singlelabel.json'))
+
+
+@_skip_no_fixtures
+def test_multilabel_smoke():
+    train_main(_build_smoke_cfg('labels_multilabel.json'))

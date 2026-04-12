@@ -1,8 +1,8 @@
 import json
 import os
 import tempfile
-import unittest
 
+import pytest
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -33,41 +33,40 @@ def _build_smoke_cfg():
     return cfg
 
 
-class TestInferenceFolder(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        if not os.path.isdir(VIDEOS_DIR) or not os.listdir(VIDEOS_DIR):
-            raise unittest.SkipTest(
-                f"Synthetic fixture videos not found at {VIDEOS_DIR}. "
-                f"Run: python tests/generate_synthetic_dataset.py"
-            )
-        # Train to produce a new-format checkpoint
-        cls.checkpoint_path = os.path.join(REPO_ROOT, 'checkpoints', 'test_inference_best_checkpoint.pt')
-        train_main(_build_smoke_cfg())
+_skip_no_fixtures = pytest.mark.skipif(
+    not os.path.isdir(VIDEOS_DIR) or not os.listdir(VIDEOS_DIR),
+    reason=f"Synthetic fixture videos not found at {VIDEOS_DIR}. Run: python tests/generate_synthetic_dataset.py",
+)
 
-    def test_inference_folder(self):
-        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
-            output_path = f.name
-        try:
-            run_inference_folder(
-                checkpoint_path=self.checkpoint_path,
-                video_folder=VIDEOS_DIR,
-                output=output_path,
-                batch_size=1,
-                num_workers=0,
-            )
-
-            self.assertTrue(os.path.isfile(output_path))
-
-            with open(output_path) as f:
-                results = json.load(f)
-
-            self.assertIn('preds', results)
-            self.assertGreater(len(results['preds']), 0)
-        finally:
-            if os.path.exists(output_path):
-                os.unlink(output_path)
+_checkpoint_path = os.path.join(REPO_ROOT, 'checkpoints', 'test_inference_best_checkpoint.pt')
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.fixture(scope="module")
+def trained_checkpoint():
+    train_main(_build_smoke_cfg())
+    return _checkpoint_path
+
+
+@_skip_no_fixtures
+def test_inference_folder(trained_checkpoint):
+    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
+        output_path = f.name
+    try:
+        run_inference_folder(
+            checkpoint_path=trained_checkpoint,
+            video_folder=VIDEOS_DIR,
+            output=output_path,
+            batch_size=1,
+            num_workers=0,
+        )
+
+        assert os.path.isfile(output_path)
+
+        with open(output_path) as f:
+            results = json.load(f)
+
+        assert 'preds' in results
+        assert len(results['preds']) > 0
+    finally:
+        if os.path.exists(output_path):
+            os.unlink(output_path)

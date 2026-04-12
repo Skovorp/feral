@@ -20,7 +20,6 @@ Requirements:
 import os
 import sys
 import subprocess
-import argparse
 import platform
 import urllib.request
 import zipfile
@@ -182,68 +181,6 @@ def process_file(args):
         print(f"❌ Error processing {input_path}: {e.stderr}")
         return False
 
-def main():
-    parser = argparse.ArgumentParser(description="Re-encode videos for FERAL processing with auto-FFmpeg setup")
-    parser.add_argument("input_dir", help="Directory containing input videos")
-    parser.add_argument("output_dir", help="Directory for re-encoded videos")
-    parser.add_argument("--processes", "-p", type=int, default=4, 
-                        help="Number of parallel processes (default: 4)")
-    
-    args = parser.parse_args()
-    
-    print("🎬 FERAL Video Re-encoding Script")
-    print("=" * 50)
-    
-    # Validate input directory
-    if not os.path.isdir(args.input_dir):
-        print(f"❌ Error: Input directory does not exist: {args.input_dir}")
-        sys.exit(1)
-    video_paths = []
-    for filename in os.listdir(args.input_dir):
-        filepath = os.path.join(args.input_dir, filename)
-        if os.path.isfile(filepath) and is_video_file(filepath):
-            video_paths.append(filepath)
-        else:
-            print(f"Input directory must only have videos. Found not video: {filepath}")
-            sys.exit(1)
-    if not video_paths:
-        print("❌ No video files found in input directory.")
-        sys.exit(1)
-    print(f"📁 Found {len(video_paths)} video files to process")
-    
-    # Create output directory
-    out_dir = Path(args.output_dir)
-    if out_dir.exists():
-        if any(out_dir.iterdir()):
-            print(f"Directory '{out_dir}' should be empty")
-            sys.exit(1)
-    else:
-        out_dir.mkdir(parents=True)
-    
-    # Setup FFmpeg (download if needed)
-    ffmpeg_binary = setup_ffmpeg()
-    input_files = [(x, args.output_dir, ffmpeg_binary) for x in video_paths]
-    
-    print(f"Using this ffmpeg path: {ffmpeg_binary}")
-    print(f"Using {args.processes} parallel processes")
-    print(f"Output directory: {args.output_dir}")
-    print("-" * 50)
-    
-    # Process files in parallel
-    with Pool(processes=args.processes) as pool:
-        results = pool.map(process_file, input_files)
-    
-    successful = sum(results)
-    total = len(input_files)
-    print("-" * 50)
-    print(f"🎉 Processing complete: {successful}/{total} files successful")
-    
-    if successful < total:
-        print(f"⚠️  {total - successful} files failed to process")
-        sys.exit(1)
-    else:
-        print("✨ All videos successfully re-encoded for FERAL!")
-        print(f"📂 Converted videos are in: {args.output_dir}")
-
 if __name__ == "__main__":
+    from feral.cli import main
     main()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "feral"
-version = "0.1.0"
+version = "0.2.0"
 description = "FERAL: Feature Extraction for Recognition of Animal Locomotion"
 readme = "README.md"
 license = {file = "LICENSE.txt"}
@@ -33,10 +33,7 @@ Homepage = "https://getferal.ai"
 Repository = "https://github.com/Skovorp/feral"
 
 [project.scripts]
-feral-train = "feral.run:main"
-feral-train-config = "feral.train:cli"
-feral-infer = "feral.inference_folder:main"
-feral-reencode = "feral.reencode_videos:main"
+feral = "feral.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["feral*"]

@@ -1,12 +1,4 @@
-"""Run inference on all videos in a folder using a saved checkpoint.
-
-Usage:
-    python inference_folder.py <checkpoint_path> <video_folder> [--output results.json] [--device cuda]
-
-The checkpoint must be in the new format (with embedded class_names and is_multilabel).
-No labels.json is needed.
-"""
-import argparse
+"""Run inference on all videos in a folder using a saved checkpoint."""
 import importlib.resources
 import json
 import logging
@@ -60,9 +52,6 @@ def build_inference_labels_json(video_filenames, class_names, is_multilabel):
 
 def run_inference_folder(checkpoint_path, video_folder, output=None,
                          batch_size=8, num_workers=4, compile=False):
-    assert os.path.isfile(checkpoint_path), f"Checkpoint not found: {checkpoint_path}"
-    assert os.path.isdir(video_folder), f"Video folder not found: {video_folder}"
-
     with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
         with open(cfg_path, 'r') as f:
             cfg = yaml.safe_load(f)
@@ -122,25 +111,6 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     logger.info("Results saved to %s", output)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run inference on a folder of videos.")
-    parser.add_argument('checkpoint', help="Path to a model checkpoint.")
-    parser.add_argument('video_folder', help="Path to folder containing videos.")
-    parser.add_argument('--output', '-o', default=None,
-                        help="Output JSON path (default: inference_<folder_name>.json)")
-    parser.add_argument('--batch_size', '-b', type=int, default=8, help="Batch size (default: 8)")
-    parser.add_argument('--num_workers', '-w', type=int, default=4, help="DataLoader workers (default: 4)")
-    parser.add_argument('--compile', action='store_true', help="Compile model with torch.compile")
-    args = parser.parse_args()
-    run_inference_folder(
-        checkpoint_path=args.checkpoint,
-        video_folder=args.video_folder,
-        output=args.output,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        compile=args.compile,
-    )
-
-
 if __name__ == '__main__':
+    from feral.cli import main
     main()

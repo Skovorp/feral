@@ -15,7 +15,7 @@ VIDEOS_DIR = os.path.join(FIXTURES_DIR, 'videos')
 
 
 def _build_smoke_cfg():
-    with open(os.path.join(REPO_ROOT, 'configs', 'default_vjepa.yaml')) as f:
+    with open(os.path.join(REPO_ROOT, 'feral', 'default_config.yaml')) as f:
         cfg = yaml.safe_load(f)
     cfg['run_name'] = 'test_inference'
     cfg['max_batches'] = 1

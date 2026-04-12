@@ -216,15 +216,6 @@ def main(cfg):
         save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth)
        
 
-def cli():
-    import argparse
-    parser = argparse.ArgumentParser(description="Run FERAL training from a config file.")
-    parser.add_argument('config', help="Path to a YAML config file.")
-    args = parser.parse_args()
-    with open(args.config, 'r') as f:
-        cfg = yaml.safe_load(f)
-    main(cfg)
-
-
 if __name__ == '__main__':
-    cli()
+    from feral.cli import main as cli_main
+    cli_main()

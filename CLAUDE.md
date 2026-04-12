@@ -30,3 +30,8 @@ If you need to install a new dependency *for local Mac development*, install it 
 - **`decord` is installed via `eva-decord`** in the Mac env, because the community fork is the only one that ships Apple Silicon wheels. The upstream `decord` package on PyPI has no arm64 build. Both expose the same `decord` module name, so imports work transparently. **On Linux/runpod, use the real `decord` package** — it has Linux wheels and is what the README assumes.
 - `torch` has a minimum floor of `>=2.4` in `requirements.txt` (required by `transformers` 5.x) but is intentionally **not pinned to an exact version** — cloud/HPC environments usually ship a working torch+CUDA, and a hard pin fights that. The README documents the tested torch/CUDA combo.
 - The rest of `requirements.txt` is pinned with `==` and chosen to keep the project compatible with **Python 3.10+**. Notably, `pandas` is held at `2.3.x` and `scikit-learn` at `1.7.x` because their next majors (`pandas` 3.0, `scikit-learn` 1.8) require Python ≥ 3.11. If you bump either of those, double-check the new floor.
+
+
+Do not regenerate fixtures. they are already ok
+Use unittest
+use twine to publish to pypi

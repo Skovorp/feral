@@ -5,9 +5,7 @@ T5. test coverage for:
     - Metric calculations (mAP, F1)
     - Chunk ensembling logic
     - Data augmentation pipeline
-6. hardcoded paths? move old configs to some other place?
 7. Add information how to run wandb server locally 
-8. pip install feral: pyproject.toml with [project.scripts] + add release and versions to feral 
     13. run not at 256 by 256?
 17. Documentation:
     - config parameters
@@ -18,6 +16,8 @@ Done:
 1. pin versions in requirements
 2. split train.py to smaller modules 
 3. windows support (https://github.com/Skovorp/feral/issues/11)
+6. hardcoded paths? move old configs to some other place?
+8. pip install feral: pyproject.toml with [project.scripts] + add release and versions to feral 
 10. remove requirement for labels.json for inference. add class_names to checkpoint
 11. no command line prompts
 12. frame id encoding logic - simplify?. - metrics.py:91 parses frame IDs with x[0].split('_chunkind_')[1] — fragile if a filename ever contains that substring. You already use a proper regex at metrics.py:102; just reuse it. This is sub-task of your 12.

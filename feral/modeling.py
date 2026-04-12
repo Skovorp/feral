@@ -6,8 +6,8 @@ from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 from transformers import get_cosine_schedule_with_warmup
 
-from model import HFModel
-from utils import get_weights
+from feral.model import HFModel
+from feral.utils import get_weights
 
 logger = logging.getLogger(__name__)
 

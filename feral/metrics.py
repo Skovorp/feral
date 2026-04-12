@@ -11,8 +11,8 @@ import os
 import traceback
 import logging
 
-from utils import last_nonzero_index, next_nonzero_index
-from dataset import get_frame_count
+from feral.utils import last_nonzero_index, next_nonzero_index
+from feral.dataset import get_frame_count
 
 logger = logging.getLogger(__name__)
 

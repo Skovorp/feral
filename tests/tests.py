@@ -1,3 +1,6 @@
+import unittest
+
+from feral.dataset import get_frame_ids
 
 
 class TestGetFrameIds(unittest.TestCase):

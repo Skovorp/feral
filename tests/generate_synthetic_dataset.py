@@ -470,7 +470,7 @@ def main():
 
         print(f"\nRe-encoding via reencode_videos.py -> {out_videos_dir}")
         result = subprocess.run(
-            [sys.executable, str(repo_root / "reencode_videos.py"),
+            [sys.executable, "-m", "feral.reencode_videos",
              str(tmp_dir), str(out_videos_dir), "-p", "1"],
             check=False,
         )

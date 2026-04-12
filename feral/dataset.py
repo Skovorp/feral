@@ -10,7 +10,7 @@ import json
 import traceback
 import random
 import logging
-from utils import get_class_frequencies
+from feral.utils import get_class_frequencies
 
 logger = logging.getLogger(__name__)
 

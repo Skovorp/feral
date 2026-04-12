@@ -1,13 +1,10 @@
 import os
-import sys
 import unittest
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
 
-from train import main as train_main
+from feral.train import main as train_main
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 

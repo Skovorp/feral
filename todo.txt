@@ -7,8 +7,7 @@ T5. test coverage for:
     - Data augmentation pipeline
 6. hardcoded paths? move old configs to some other place?
 7. Add information how to run wandb server locally 
-8. pip install feral: pyproject.toml with [project.scripts]
-9. add release and versions to feral 
+8. pip install feral: pyproject.toml with [project.scripts] + add release and versions to feral 
     13. run not at 256 by 256?
 17. Documentation:
     - config parameters

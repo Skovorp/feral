@@ -1,7 +1,7 @@
 import torch
 from tqdm import tqdm
 
-from utils import prep_for_answers
+from feral.utils import prep_for_answers
 
 
 def _to_prob(output, is_multilabel):

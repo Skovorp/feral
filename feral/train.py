@@ -1,7 +1,7 @@
-from data import build_datasets_and_loaders
-from loops import train_one_epoch, evaluate, run_inference
-from modeling import build_model, build_training_objects, load_model_from_checkpoint
-from utils import save_model, pick_and_save_best, validate_labels_json, check_environment
+from feral.data import build_datasets_and_loaders
+from feral.loops import train_one_epoch, evaluate, run_inference
+from feral.modeling import build_model, build_training_objects, load_model_from_checkpoint
+from feral.utils import save_model, pick_and_save_best, validate_labels_json, check_environment
 import yaml
 import torch
 import wandb
@@ -9,8 +9,8 @@ import json
 import datetime
 import numpy as np
 import random
-from metrics import generate_empty_logits, ensemble_predictions
-from metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
+from feral.metrics import generate_empty_logits, ensemble_predictions
+from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
 import sys
 import os
 import logging
@@ -216,9 +216,15 @@ def main(cfg):
         save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth)
        
 
-if __name__ == '__main__':
-    assert len(sys.argv) > 1 and len(sys.argv[1]) > 0, "Usage: python train.py <path_to_config.yaml>"
-
-    with open(sys.argv[1], 'r') as f:
+def cli():
+    import argparse
+    parser = argparse.ArgumentParser(description="Run FERAL training from a config file.")
+    parser.add_argument('config', help="Path to a YAML config file.")
+    args = parser.parse_args()
+    with open(args.config, 'r') as f:
         cfg = yaml.safe_load(f)
     main(cfg)
+
+
+if __name__ == '__main__':
+    cli()

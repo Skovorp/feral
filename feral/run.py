@@ -1,13 +1,17 @@
-from train import main
+from feral.train import main as train_main
 import argparse
+import importlib.resources
 import yaml
 import os
 import wandb
 from urllib.parse import urlparse
 
-from utils import get_random_run_name
+from feral.utils import get_random_run_name
 
-if __name__ == '__main__':
+_DEFAULT_CONFIG = importlib.resources.files("feral").joinpath("default_config.yaml")
+
+
+def main():
     parser = argparse.ArgumentParser(description="Run the FERAL training pipeline.")
     parser.add_argument('video_folder', help="Path to the folder containing training videos.")
     parser.add_argument('label_json_path', help="Path to the label JSON file.")
@@ -41,8 +45,9 @@ if __name__ == '__main__':
     if checkpoint_path is not None:
         assert os.path.isfile(checkpoint_path), f"Checkpoint path is not a file: {checkpoint_path}"
 
-    with open('configs/default_vjepa.yaml', 'r') as f:
-        cfg = yaml.safe_load(f)
+    with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
+        with open(cfg_path, 'r') as f:
+            cfg = yaml.safe_load(f)
 
     cfg['data']['prefix'] = prefix_path
     cfg['data']['label_json'] = label_json_path
@@ -95,4 +100,8 @@ if __name__ == '__main__':
     else:
         raise SystemExit(f'Should be "open", "personal", or "skip". Got {res!r}')
 
-    main(cfg)
+    train_main(cfg)
+
+
+if __name__ == '__main__':
+    main()

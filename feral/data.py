@@ -2,7 +2,7 @@ import logging
 
 from torch.utils.data import DataLoader
 
-from dataset import ClsDataset, collate_fn_val, collate_fn_inference
+from feral.dataset import ClsDataset, collate_fn_val, collate_fn_inference
 
 logger = logging.getLogger(__name__)
 

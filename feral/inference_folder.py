@@ -7,6 +7,7 @@ The checkpoint must be in the new format (with embedded class_names and is_multi
 No labels.json is needed.
 """
 import argparse
+import importlib.resources
 import json
 import logging
 import os
@@ -15,13 +16,15 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from dataset import (
+_DEFAULT_CONFIG = importlib.resources.files("feral").joinpath("default_config.yaml")
+
+from feral.dataset import (
     ClsDataset,
     collate_fn_inference,
 )
-from loops import run_inference
-from metrics import save_inference_results
-from modeling import load_model_from_checkpoint
+from feral.loops import run_inference
+from feral.metrics import save_inference_results
+from feral.modeling import load_model_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
@@ -60,8 +63,9 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     assert os.path.isfile(checkpoint_path), f"Checkpoint not found: {checkpoint_path}"
     assert os.path.isdir(video_folder), f"Video folder not found: {video_folder}"
 
-    with open('configs/default_vjepa.yaml', 'r') as f:
-        cfg = yaml.safe_load(f)
+    with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
+        with open(cfg_path, 'r') as f:
+            cfg = yaml.safe_load(f)
 
     cfg['training']['compile'] = compile
     device = 'cuda'
@@ -118,7 +122,7 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     logger.info("Results saved to %s", output)
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description="Run inference on a folder of videos.")
     parser.add_argument('checkpoint', help="Path to a model checkpoint.")
     parser.add_argument('video_folder', help="Path to folder containing videos.")
@@ -136,3 +140,7 @@ if __name__ == '__main__':
         num_workers=args.num_workers,
         compile=args.compile,
     )
+
+
+if __name__ == '__main__':
+    main()

@@ -46,7 +46,11 @@ def main(cfg):
 
     class_names = {int(x): y for x, y in labels_json['class_names'].items()}
     num_classes = len(class_names)
-    model_save_metadata = {'class_names': class_names, 'is_multilabel': labels_json['is_multilabel']}
+    model_save_metadata = {
+        'class_names': class_names,
+        'is_multilabel': labels_json['is_multilabel'],
+        'cfg': cfg,
+    }
 
     os.makedirs("answers", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)

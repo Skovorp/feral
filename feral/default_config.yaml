@@ -10,6 +10,7 @@ data:
   chunk_shift: 32
   chunk_step: 1
   resize_to: 256
+  resize_style: square
   do_aa: true
   part_sample: 1.0
   subsample_keep_rare_threshold: null

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from feral.dataset import collate_fn_val, collate_fn_inference
+from feral.dataset import build_resize_transform, collate_fn_val, collate_fn_inference
 from feral.loops import _to_prob
 
 
@@ -79,3 +79,55 @@ class TestToProb:
         probs = _to_prob(logits, is_multilabel=True)
         assert (probs >= 0).all()
         assert (probs <= 1).all()
+
+
+# ===================================================================
+# build_resize_transform
+# ===================================================================
+
+class TestBuildResizeTransform:
+    def test_square_on_landscape_squishes(self):
+        t = build_resize_transform(resize_to=128, resize_style="square")
+        video = torch.zeros(4, 3, 240, 480)  # (T, C, H, W)
+        out = t(video)
+        assert out.shape == (4, 3, 128, 128)
+
+    def test_square_on_portrait_squishes(self):
+        t = build_resize_transform(resize_to=64, resize_style="square")
+        video = torch.zeros(4, 3, 480, 240)
+        out = t(video)
+        assert out.shape == (4, 3, 64, 64)
+
+    def test_rectangle_preserves_aspect_landscape(self):
+        t = build_resize_transform(resize_to=128, resize_style="rectangle")
+        video = torch.zeros(4, 3, 240, 480)
+        out = t(video)
+        # Smallest side (H=240) becomes 128, width scales: 480 * 128/240 = 256
+        assert out.shape == (4, 3, 128, 256)
+
+    def test_rectangle_preserves_aspect_portrait(self):
+        t = build_resize_transform(resize_to=128, resize_style="rectangle")
+        video = torch.zeros(4, 3, 480, 240)
+        out = t(video)
+        # Smallest side (W=240) becomes 128, height scales: 480 * 128/240 = 256
+        assert out.shape == (4, 3, 256, 128)
+
+    def test_rectangle_on_square_stays_square(self):
+        t = build_resize_transform(resize_to=96, resize_style="rectangle")
+        video = torch.zeros(4, 3, 256, 256)
+        out = t(video)
+        assert out.shape == (4, 3, 96, 96)
+
+    def test_rectangle_does_upscale(self):
+        """Dataset-side resize is expected to always match the target size
+        (even upscaling). Downscale-only is handled at reencode time."""
+        t = build_resize_transform(resize_to=512, resize_style="rectangle")
+        video = torch.zeros(4, 3, 240, 320)
+        out = t(video)
+        # Smallest side (H=240) becomes 512, width scales: 320 * 512/240 ≈ 682
+        assert out.shape[:3] == (4, 3, 512)
+        assert out.shape[3] in (682, 683)
+
+    def test_invalid_style_raises(self):
+        with pytest.raises(ValueError, match="resize_style"):
+            build_resize_transform(resize_to=128, resize_style="circle")

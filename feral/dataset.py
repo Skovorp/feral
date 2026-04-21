@@ -35,6 +35,19 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
+def build_resize_transform(resize_to, resize_style):
+    """Construct the torchvision Resize transform for a given `resize_style`.
+
+    - "square":    squish videos to ``(resize_to, resize_to)`` regardless of input aspect ratio.
+    - "rectangle": resize so the smallest side becomes ``resize_to``, preserving aspect ratio.
+    """
+    if resize_style == "square":
+        return torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
+    if resize_style == "rectangle":
+        return torchvision.transforms.v2.Resize(resize_to, antialias=True)
+    raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
+
+
 def get_frame_count(path: str):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Video not found: {path}")
@@ -48,7 +61,8 @@ def get_frame_count(path: str):
 class ClsDataset():
     def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
                  num_classes, prefix, resize_to, chunk_shift, chunk_length,
-                 chunk_step, part_sample=1.0, subsample_keep_rare_threshold=None, **kwargs):
+                 chunk_step, resize_style="square", part_sample=1.0,
+                 subsample_keep_rare_threshold=None, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -62,7 +76,7 @@ class ClsDataset():
         else:
              self.aug = None
         
-        self.resize = torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
+        self.resize = build_resize_transform(resize_to, resize_style)
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
 

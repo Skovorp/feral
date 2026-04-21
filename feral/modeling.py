@@ -58,6 +58,7 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
         metadata = {
             'class_names': raw['class_names'],
             'is_multilabel': raw['is_multilabel'],
+            'cfg': raw.get('cfg'),
         }
         num_classes = len(metadata['class_names'])
     else:

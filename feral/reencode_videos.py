@@ -146,23 +146,42 @@ def is_video_file(filepath):
     mime_type, _ = mimetypes.guess_type(filepath)
     return mime_type is not None and mime_type.startswith('video')
 
+DEFAULT_SMALLEST_SIDE = 512
+
+def build_scale_filter(smallest_side):
+    """Build an ffmpeg scale filter that downsizes the video so its smallest side
+    is at most `smallest_side`, preserving aspect ratio. Never upscales. Output
+    dimensions are forced to multiples of 2 (required by libx264)."""
+    # When iw > ih: height is smaller -> cap height at smallest_side, auto width.
+    # When iw <= ih: width is smaller -> cap width at smallest_side, auto height.
+    s = smallest_side
+    return (
+        f"scale='if(gt(iw,ih),-2,min({s},iw))'"
+        f":'if(gt(iw,ih),min({s},ih),-2)'"
+        ":flags=lanczos"
+    )
+
 def process_file(args):
     """Process a single video file with ffmpeg."""
-    input_path, output_dir, ffmpeg_binary = args
-    
+    if len(args) == 4:
+        input_path, output_dir, ffmpeg_binary, smallest_side = args
+    else:
+        input_path, output_dir, ffmpeg_binary = args
+        smallest_side = DEFAULT_SMALLEST_SIDE
+
     # Create output filename with .mp4 extension
     input_name = Path(input_path).stem
     output_path = os.path.join(output_dir, f"{input_name}.mp4")
-    
+
     # Skip if output already exists
     if os.path.exists(output_path):
         print(f"Output already exists, skipping: {output_path}")
         return True
-    
+
     # FFmpeg command for FERAL-compatible encoding
     cmd = [
         ffmpeg_binary, "-i", input_path,
-        "-vf", "scale=256:256:flags=lanczos",  # Resize to 256x256 with high-quality scaling
+        "-vf", build_scale_filter(smallest_side),
         "-c:v", "libx264",                      # H.264 video codec
         "-pix_fmt", "yuv420p",                  # Standard pixel format
         "-crf", "25",                           # Constant rate factor (quality)

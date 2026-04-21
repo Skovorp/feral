@@ -134,11 +134,12 @@ def _cmd_reencode(args):
 
     # Setup FFmpeg (download if needed)
     ffmpeg_binary = setup_ffmpeg()
-    input_files = [(x, args.output_dir, ffmpeg_binary) for x in video_paths]
+    input_files = [(x, args.output_dir, ffmpeg_binary, args.smallest_side) for x in video_paths]
 
     print(f"Using this ffmpeg path: {ffmpeg_binary}")
     print(f"Using {args.processes} parallel processes")
     print(f"Output directory: {args.output_dir}")
+    print(f"Downsizing videos so smallest side <= {args.smallest_side} px (aspect ratio preserved)")
     print("-" * 50)
 
     # Process files in parallel
@@ -198,6 +199,10 @@ def main():
     p_reencode.add_argument('output_dir', help='Directory for re-encoded videos')
     p_reencode.add_argument('--processes', '-p', type=int, default=4,
                             help='Number of parallel processes (default: 4)')
+    p_reencode.add_argument('--smallest-side', '-s', type=int, default=512,
+                            help='Downsize videos so their smallest side is at most this value, '
+                                 'preserving aspect ratio. Videos already smaller are left as-is. '
+                                 '(default: 512)')
     p_reencode.set_defaults(func=_cmd_reencode)
 
     # Validate cross-arg constraints for train

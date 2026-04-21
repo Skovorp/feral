@@ -50,11 +50,30 @@ def build_inference_labels_json(video_filenames, class_names, is_multilabel):
     }
 
 
-def run_inference_folder(checkpoint_path, video_folder, output=None,
-                         batch_size=8, num_workers=4, compile=False):
+def _load_default_cfg():
     with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
         with open(cfg_path, 'r') as f:
-            cfg = yaml.safe_load(f)
+            return yaml.safe_load(f)
+
+
+def run_inference_folder(checkpoint_path, video_folder, output=None,
+                         batch_size=8, num_workers=4, compile=False):
+    # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
+    # Falling back to default_config only covers legacy checkpoints where the
+    # cfg wasn't persisted — the data/model params in default_config may not
+    # match how the model was actually trained.
+    raw = torch.load(checkpoint_path, map_location="cpu")
+    stored_cfg = raw.get('cfg') if isinstance(raw, dict) else None
+    if stored_cfg is not None:
+        cfg = stored_cfg
+        logger.info("Using training cfg embedded in checkpoint")
+    else:
+        logger.warning(
+            "Checkpoint has no embedded training cfg (legacy format). Falling "
+            "back to default_config.yaml — model/data params may not match how "
+            "this checkpoint was trained."
+        )
+        cfg = _load_default_cfg()
 
     cfg['training']['compile'] = compile
     device = 'cuda'
@@ -86,6 +105,7 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
         num_classes=num_classes,
         prefix=video_folder,
         resize_to=cfg['data']['resize_to'],
+        resize_style=cfg['data'].get('resize_style', 'square'),
         chunk_shift=cfg['data']['chunk_shift'],
         chunk_length=cfg['data']['chunk_length'],
         chunk_step=cfg['data']['chunk_step'],

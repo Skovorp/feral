@@ -130,7 +130,6 @@ def test_smoke_rectangle_nonsquare_video(tmp_path):
     cfg['data']['label_json'] = labels_path
     cfg['data']['resize_to'] = 192
     cfg['data']['resize_style'] = 'rectangle'
-    cfg['model']['class_weights'] = None  # dummy all-zero labels → can't use inv-freq
     # input is 320x240 -> rectangle/192 keeps aspect: (H,W) = (192, 256)
     cfg['training']['epochs'] = 1
     cfg['training']['train_bs'] = 1

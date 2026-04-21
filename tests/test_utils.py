@@ -127,11 +127,15 @@ class TestGetClassFrequencies:
 # ===================================================================
 
 class TestGetWeights:
-    def _make_json(self, labels, is_multilabel=False):
+    def _make_json(self, labels, is_multilabel=False, num_classes=None):
+        if num_classes is None:
+            arr = np.asarray(labels)
+            num_classes = arr.shape[-1] if is_multilabel else int(arr.max()) + 1
         return {
             "labels": {"vid.mp4": labels},
             "splits": {"train": ["vid.mp4"]},
             "is_multilabel": is_multilabel,
+            "class_names": {str(i): f"c{i}" for i in range(num_classes)},
         }
 
     def test_none_returns_none(self):
@@ -165,10 +169,20 @@ class TestGetWeights:
 
     def test_zero_freq_clamped(self):
         # Class 1 never appears → freq 0 → would be inf, should be clamped
-        json_data = self._make_json([0, 0, 0, 0])
-        json_data["labels"]["vid.mp4"] = [0, 0, 0, 0]
+        json_data = self._make_json([0, 0, 0, 0], num_classes=2)
         w = get_weights(json_data, "inv_freq", "cpu")
         assert w.max().item() <= 1000000.0
+
+    def test_sizes_to_declared_num_classes(self):
+        """Regression: when the train split happens to contain zero examples
+        of a high-index class, the returned weight tensor must still have
+        length == num_classes (otherwise CrossEntropyLoss crashes with
+        'weight tensor should be defined either for all N classes or no
+        classes')."""
+        # 3 declared classes; train split only sees class 0.
+        json_data = self._make_json([0, 0, 0], num_classes=3)
+        w = get_weights(json_data, "inv_freq_sqrt", "cpu")
+        assert w.shape == (3,)
 
 
 # ===================================================================

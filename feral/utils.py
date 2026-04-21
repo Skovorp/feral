@@ -51,7 +51,11 @@ def get_weights(json_data, weight_type, device):
     if weight_type is None:
         return None 
     arr = np.concatenate([json_data['labels'][x] for x in json_data['splits']['train']])
-    freqs = torch.tensor(get_class_frequencies(arr))
+    # Pass num_classes so bincount covers declared classes even when the train
+    # split has zero examples of a high-index class (otherwise the returned
+    # weight tensor is too short and CrossEntropyLoss crashes).
+    num_classes = len(json_data['class_names'])
+    freqs = torch.tensor(get_class_frequencies(arr, num_classes=num_classes))
     
     if len(arr.shape) == 1:
         ratio = (1.0 / freqs).to(device)

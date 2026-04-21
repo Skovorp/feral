@@ -6,20 +6,22 @@ from timm.utils import ModelEma
 from torchvision.transforms.v2 import MixUp
 from transformers import get_cosine_schedule_with_warmup
 
-from feral.model import HFModel
+from feral.backbones import warn_if_resize_mismatch
+from feral.model import FeralModel
 from feral.utils import get_weights
 
 logger = logging.getLogger(__name__)
 
 
 def build_model(cfg, num_classes, device, *, with_ema=True):
-    """Construct HFModel, move to device, optionally compile and wrap in EMA.
+    """Construct FeralModel, move to device, optionally compile and wrap in EMA.
 
     Returns (model, model_ema). model_ema is None if cfg['ema_decay'] is None
     or with_ema is False.
     """
-    model = HFModel(
-        model_name=cfg['model_name'],
+    warn_if_resize_mismatch(cfg)
+    model = FeralModel(
+        backbone=cfg['backbone'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
         **cfg['model'],
@@ -74,8 +76,9 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
         state_dict = raw
         metadata = None
 
-    model = HFModel(
-        model_name=cfg['model_name'],
+    warn_if_resize_mismatch(cfg)
+    model = FeralModel(
+        backbone=cfg['backbone'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
         **cfg['model'],

@@ -1,5 +1,5 @@
 run_name: new_run
-model_name: "facebook/vjepa2-vitl-fpc32-256-diving48"
+backbone: vjepa2_vitl_diving48
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5

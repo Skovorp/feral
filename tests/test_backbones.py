@@ -85,14 +85,17 @@ def test_backbone_forward(backbone_key, train_batches, cuda_cleanup):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = FeralModel(
-        backbone=backbone_key,
-        num_classes=num_classes,
-        predict_per_item=predict_per_item,
-        fc_drop_rate=0.0,
-        freeze_encoder_layers=0,
-        pretrained=False,
-    ).to(device)
+    # Construct on the target device directly. Random-init of a 1B+ param ViT
+    # on CPU takes 30+ seconds (GPU sits idle); building on GPU is ~instant.
+    with device:
+        model = FeralModel(
+            backbone=backbone_key,
+            num_classes=num_classes,
+            predict_per_item=predict_per_item,
+            fc_drop_rate=0.0,
+            freeze_encoder_layers=0,
+            pretrained=False,
+        )
     model.eval()
     with torch.no_grad():
         out = model(x_cpu.to(device))

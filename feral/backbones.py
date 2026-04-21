@@ -58,7 +58,7 @@ BACKBONES = {
     "vjepa2_1_vitgg_384": {
         "source": "hub",
         "hub_name": "vjepa2_1_vit_gigantic_384",
-        "hidden_dim": 1792,
+        "hidden_dim": 1664,
         "img_size": 384,
     },
 }

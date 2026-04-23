@@ -72,23 +72,6 @@ def _get_entry(backbone):
     return BACKBONES[backbone]
 
 
-def _pick_attn_impl():
-    """Pick best available attention backend for the current GPU.
-
-    FA3 requires Hopper (SM 90+) and flash-attn >= 2.7 (which ships the
-    `flash_attn_interface` module). Anything else stays on FA2.
-    """
-    if not torch.cuda.is_available():
-        return "flash_attention_2"
-    if torch.cuda.get_device_capability()[0] < 9:
-        return "flash_attention_2"
-    try:
-        import flash_attn_interface  # noqa: F401
-    except ImportError:
-        return "flash_attention_2"
-    return "flash_attention_3"
-
-
 def get_hidden_dim(backbone):
     return _get_entry(backbone)["hidden_dim"]
 
@@ -125,34 +108,12 @@ class BackboneAdapter(nn.Module):
 
         if self.source == "hf":
             from transformers import AutoConfig, AutoModel
-            attn_impl = _pick_attn_impl()
-            try:
-                if pretrained:
-                    self.model = AutoModel.from_pretrained(
-                        entry["slug"], attn_implementation=attn_impl,
-                    )
-                else:
-                    # Config-only — no weight download. Architecture is initialized
-                    # randomly; useful for shape/wiring tests.
-                    self.model = AutoModel.from_config(
-                        AutoConfig.from_pretrained(entry["slug"]),
-                        attn_implementation=attn_impl,
-                    )
-            except (ImportError, ValueError) as e:
-                if attn_impl != "flash_attention_3":
-                    raise
-                logger.warning("flash_attention_3 unavailable (%s); falling back to flash_attention_2", e)
-                attn_impl = "flash_attention_2"
-                if pretrained:
-                    self.model = AutoModel.from_pretrained(
-                        entry["slug"], attn_implementation=attn_impl,
-                    )
-                else:
-                    self.model = AutoModel.from_config(
-                        AutoConfig.from_pretrained(entry["slug"]),
-                        attn_implementation=attn_impl,
-                    )
-            logger.info("attention backend: %s", attn_impl)
+            if pretrained:
+                self.model = AutoModel.from_pretrained(entry["slug"])
+            else:
+                # Config-only — no weight download. Architecture is initialized
+                # randomly; useful for shape/wiring tests.
+                self.model = AutoModel.from_config(AutoConfig.from_pretrained(entry["slug"]))
             self.model.predictor = None
         elif self.source == "hub":
             encoder, _predictor = torch.hub.load(

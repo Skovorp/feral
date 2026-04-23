@@ -29,7 +29,7 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
     model.to(device)
 
     if cfg['training']['compile']:
-        model = torch.compile(model, mode="max-autotune", dynamic=True)
+        model = torch.compile(model, mode="reduce-overhead")
 
     model_ema = None
     if with_ema and cfg['ema_decay'] is not None:

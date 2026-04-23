@@ -9,7 +9,8 @@ segments in random order. Two label files are produced from the same videos:
   - labels_multilabel.json  (6 mouse-specific flags per frame)
 
 Behavior segment types:
-  - copulation:        both mice adjacent, not moving (rare; only in 2 videos)
+  - copulation:        both mice adjacent, not moving (rare; only in 4 videos,
+                       distributed across train/val/test so every split sees it)
   - playing:           both mice orbit a midpoint at offset phases
   - a_eats_b_sleeps:   mouse_a in feeder, mouse_b stationary elsewhere
   - a_sleeps_b_eats:   mirror image
@@ -17,7 +18,7 @@ Behavior segment types:
   - wandering:         both mice random-walking (single-label "other")
 
 Each video has the 5 non-copulation segments in a random order with random
-lengths (150-250 frames each). The 2 designated copulation videos additionally
+lengths (150-250 frames each). The 4 designated copulation videos additionally
 have a copulation segment inserted at a random position.
 
 Smooth transitions
@@ -68,7 +69,7 @@ FRAME_RATE = 30
 SEG_LEN_MIN = 150
 SEG_LEN_MAX = 250
 TRANSITION_FRAMES = 10
-COPULATION_VIDEO_INDICES = (0, 1)
+COPULATION_VIDEO_INDICES = (0, 1, 12, 15)
 
 FEEDER_TL = (216, 216)
 FEEDER_BR = (248, 248)
@@ -120,8 +121,9 @@ SEGMENT_TO_MULTI = {
     "_transition": (),
 }
 
-# Splits over the 18 videos. Copulation videos (0, 1) live in train so the
-# rare-class subsampling code path has something to find.
+# Splits over the 18 videos. Copulation videos are spread across train (0, 1),
+# val (12), and test (15) so every split has at least one example of the rare
+# class — and the rare-class subsampling code path has something to find.
 SPLITS = {
     "train": list(range(12)),
     "val": list(range(12, 15)),
@@ -468,14 +470,14 @@ def main():
             seg_summary = ", ".join(s for s, _ in plan)
             print(f"  {fn}: {len(frames):5d} frames  [{seg_summary}]")
 
-        print(f"\nRe-encoding via reencode_videos.py -> {out_videos_dir}")
+        print(f"\nRe-encoding via feral reencode -> {out_videos_dir}")
         result = subprocess.run(
-            [sys.executable, "-m", "feral.reencode_videos",
+            [sys.executable, "-m", "feral.cli", "reencode",
              str(tmp_dir), str(out_videos_dir), "-p", "1"],
             check=False,
         )
         if result.returncode != 0:
-            raise RuntimeError("reencode_videos.py failed")
+            raise RuntimeError("feral reencode failed")
 
     single_json = build_labels_json(seg_labels_per_video, video_filenames, "single")
     multi_json = build_labels_json(seg_labels_per_video, video_filenames, "multi")

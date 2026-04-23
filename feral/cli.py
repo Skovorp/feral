@@ -74,10 +74,14 @@ def _cmd_train(args):
 # ── train-config ─────────────────────────────────────────────────────────────
 
 def _cmd_train_config(args):
+    import wandb
     from feral.train import main as train_main
 
     with open(args.config, 'r') as f:
         cfg = yaml.safe_load(f)
+    key = cfg.get('wandb', {}).get('key') if cfg.get('wandb') else None
+    if key:
+        wandb.login(key=key)
     train_main(cfg)
 
 

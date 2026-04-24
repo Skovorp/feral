@@ -14,10 +14,23 @@ from feral.utils import get_class_frequencies
 
 logger = logging.getLogger(__name__)
 
-def read_range_video_decord(path, frames):
-    vr = VideoReader(path)
+def read_range_video_decord(path, frames, width=-1, height=-1):
+    vr = VideoReader(path, width=width, height=height)
     video = vr.get_batch(frames).asnumpy()  # (T, H, W, C)
     return torch.from_numpy(video).permute(0, 3, 1, 2)
+
+
+def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
+    """Target (width, height) for decord decode-time resize, matching
+    torchvision `build_resize_transform` output size."""
+    if resize_style == "square":
+        return resize_to, resize_to
+    if resize_style == "rectangle":
+        # Match torchvision Resize(int): shorter side -> resize_to, preserve AR.
+        if orig_h <= orig_w:
+            return round(orig_w * resize_to / orig_h), resize_to
+        return resize_to, round(orig_h * resize_to / orig_w)
+    raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
 def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
         # chunk_step = 1 -- pick every frame        XXXX
@@ -58,6 +71,14 @@ def get_frame_count(path: str):
     finally:
         cap.release()
 
+
+def get_video_dims(path: str):
+    cap = cv2.VideoCapture(path)
+    try:
+        return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    finally:
+        cap.release()
+
 class ClsDataset():
     def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
                  num_classes, prefix, resize_to, chunk_shift, chunk_length,
@@ -70,13 +91,14 @@ class ClsDataset():
         self.is_multilabel = None
         self.json_data = label_json_dict
         
+        self.resize_to = resize_to
+        self.resize_style = resize_style
         self.parse_json(chunk_shift, chunk_length, chunk_step)
         if do_aa and self.partition == "train":
             self.aug = TrivialAugmentWide()
         else:
              self.aug = None
-        
-        self.resize = build_resize_transform(resize_to, resize_style)
+
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
 
@@ -127,9 +149,14 @@ class ClsDataset():
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
         self.samples = []
         self.labels = []
+        self.decode_size = None
 
         for fn in self.json_data['splits'][self.partition]:
-            video_total_frames = get_frame_count(os.path.join(self.prefix, fn))
+            pth = os.path.join(self.prefix, fn)
+            video_total_frames = get_frame_count(pth)
+            if self.decode_size is None:
+                orig_w, orig_h = get_video_dims(pth)
+                self.decode_size = compute_decode_size(orig_w, orig_h, self.resize_to, self.resize_style)
             if self.partition != 'inference':
                 json_total_frames = len(self.json_data['labels'][fn])
                 assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
@@ -153,13 +180,13 @@ class ClsDataset():
     def get_video(self, i):
         fn, frames = self.samples[i]
         pth = os.path.join(self.prefix, fn)
+        w, h = self.decode_size
         # names are (filename as in labels.json, index of a frame within the video, index of a frame within a chunk)
-        return read_range_video_decord(pth, frames), [(fn, frames[i], i) for i in range(len(frames))]
-    
+        return read_range_video_decord(pth, frames, width=w, height=h), [(fn, frames[i], i) for i in range(len(frames))]
+
     def get_item_simple(self, index):
         video, names = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
-        video = self.resize(video)
         outputs = self.norm(video * self.scale)
         if self.partition != "inference":
             label = self.labels[index]

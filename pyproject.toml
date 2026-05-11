@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "feral"
-version = "0.3.0"
+version = "0.4.0"
 description = "FERAL: Feature Extraction for Recognition of Animal Locomotion"
 readme = "README.md"
 license = {file = "LICENSE.txt"}

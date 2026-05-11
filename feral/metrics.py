@@ -1,19 +1,20 @@
 import numpy as np
 import json 
-from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score
-import re
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
-import json
 import matplotlib.cm as cm
 import PIL
 import cv2
 import os
 import traceback
+import logging
 
-from utils import last_nonzero_index, next_nonzero_index
-from dataset import get_frame_count
+from feral.utils import last_nonzero_index, next_nonzero_index
+from feral.dataset import get_frame_count
+
+logger = logging.getLogger(__name__)
 
 def calc_frame_level_map(ans, labels_json, partition):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
@@ -43,7 +44,7 @@ def calc_frame_level_map(ans, labels_json, partition):
         res[f'ap_{cls_name}'] = ap 
     return sum(aps) / len(aps)
 
-def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
 
@@ -63,46 +64,51 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
         pred_labels = preds.argmax(1)
         target_labels = targets
 
-        return {
-            f'{prefix}_precision': precision_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
-            f'{prefix}_recall': recall_score(target_labels, pred_labels, labels=valid_classes, average='macro'),
-            f'{prefix}_f1': f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        }
+        per_class_f1 = f1_score(target_labels, pred_labels, labels=valid_classes, average=None)
+        res = {}
+        for cls_ind, f1_val in zip(valid_classes, per_class_f1):
+            res[f'{prefix}_f1_{class_names[cls_ind]}'] = f1_val
+
+        res[f'{prefix}_precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        return res
     else:
-        threshold = 0.85
-        pred_labels = (preds > threshold) * 1
+        pred_labels = (preds > multilabel_threshold) * 1
         target_labels = targets.astype(int)
 
         precisions = []
         recalls = []
         f1s = []
 
+        res = {}
         for valid_class_ind in valid_classes:
-            precisions.append(precision_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-            recalls.append(recall_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-            f1s.append(f1_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind]))
-        return {
-            f'{prefix}_precision': sum(precisions) / len(precisions),
-            f'{prefix}_recall': sum(recalls) / len(recalls),
-            f'{prefix}_f1': sum(f1s) / len(f1s)
-        }
+            p = precision_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            r = recall_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            f = f1_score(target_labels[:, valid_class_ind], pred_labels[:, valid_class_ind])
+            precisions.append(p)
+            recalls.append(r)
+            f1s.append(f)
+            res[f'{prefix}_f1_{class_names[valid_class_ind]}'] = f
+
+        res[f'{prefix}_precision'] = sum(precisions) / len(precisions)
+        res[f'{prefix}_recall'] = sum(recalls) / len(recalls)
+        res[f'{prefix}_f1'] = sum(f1s) / len(f1s)
+        # exact match: all class predictions must match all class targets
+        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        return res
 
 def ensemble_predictions(ans, logits):
-    predict_per_item = max([int(x[0].split('_chunkind_')[1]) for x in ans]) + 1
+    predict_per_item = max(x[0][2] for x in ans) + 1
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
     # uniform weights for now
     weights = np.ones(predict_per_item)[:, None]
 
     for el in ans:
-        name = el[0]
+        fn, global_ind, chunk_ind = el[0]
         preds = np.array(el[1])
-
-        # get ind
-        match = re.search(r"([^/]+)_globalind_(\d+)_chunkind_(\d+)", name)
-        fn = match.group(1)
-        global_ind = int(match.group(2))
-        chunk_ind = int(match.group(3))
 
         logits[fn][global_ind, :] += preds * weights[chunk_ind, 0]
         sum_weights[fn][global_ind] += weights[chunk_ind, 0]
@@ -115,7 +121,6 @@ def ensemble_predictions(ans, logits):
             if sum_weights[fn][i] > 0:
                 logits[fn][i, :] = logits[fn][i, :] / sum_weights[fn][i]
             else:
-                # assert left_ind[i] < i and i < right_ind[i], (left_ind[i], i, right_ind[i], sum_weights[fn][i - 5 : i + 5])
                 if left_ind[i] == -1 and right_ind[i] == -1:
                     continue
                 elif right_ind[i] == -1:
@@ -246,7 +251,6 @@ def fig2img(fig):
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
     preds = np.array([x[-2] for x in ans])
     targets = np.array([x[-1] for x in ans]).astype(int)
-    # targets = targets.argmax(1)
 
     aps = []
     res = {}
@@ -282,7 +286,7 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
         video_path = os.path.join(prefix, fn)
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            print(f"Could not open {video_path}")
+            logger.warning("Could not open %s", video_path)
             continue
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))

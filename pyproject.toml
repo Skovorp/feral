@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0,<77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feral"
+version = "0.3.0"
+description = "FERAL: Feature Extraction for Recognition of Animal Locomotion"
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
+dependencies = [
+    "torch>=2.4",
+    "pandas==2.3.3",
+    "scikit-learn==1.7.2",
+    "decord==0.6.0; sys_platform == 'linux'",
+    "eva-decord==0.6.0; sys_platform == 'darwin'",
+    "triton-windows>=3.0; sys_platform == 'win32'",
+    "transformers==5.5.3",
+    "wandb==0.25.1",
+    "timm==1.0.26",
+    "hf_xet==1.4.3",
+    "opencv-python==4.13.0.92",
+    "matplotlib==3.10.8",
+    "hf_transfer==0.1.9",
+]
+
+[project.urls]
+Homepage = "https://getferal.ai"
+Repository = "https://github.com/Skovorp/feral"
+
+[project.scripts]
+feral = "feral.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["feral*"]
+
+[tool.setuptools.package-data]
+feral = ["default_config.yaml"]

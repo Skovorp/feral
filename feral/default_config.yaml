@@ -1,15 +1,16 @@
 run_name: new_run
-model_name: "facebook/vjepa2-vitl-fpc32-256-diving48"
+backbone: vjepa2_vitl_diving48
 predict_per_item: 64
 model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
-  freeze_encoder_layers: 14
+  freeze_encoder_layers: 12
 data:
   chunk_length: 64
   chunk_shift: 32
   chunk_step: 1
   resize_to: 256
+  resize_style: square
   do_aa: true
   part_sample: 1.0
   subsample_keep_rare_threshold: null
@@ -29,7 +30,5 @@ ema_decay: 0.999
 seed: 0
 device: "cuda"
 starting_checkpoint: null
-wandb:
-  key: dde17687b4b84ba8171dfede64d865243be41a0e
-  entity: sposiboh
-  project: feral_public
+max_batches: null
+multilabel_threshold: 0.85

@@ -1,10 +1,13 @@
-pandas
-scikit-learn
-decord
-transformers
-wandb
-timm
-hf_xet
-opencv-python
-matplotlib
-hf_transfer
+torch>=2.4
+pandas==2.3.3
+scikit-learn==1.7.2
+decord==0.6.0; sys_platform == 'linux'
+eva-decord==0.6.0; sys_platform == 'darwin'
+triton-windows>=3.0; sys_platform == 'win32'
+transformers==5.5.3
+wandb==0.25.1
+timm==1.0.26
+hf_xet==1.4.3
+opencv-python==4.13.0.92
+matplotlib==3.10.8
+hf_transfer==0.1.9

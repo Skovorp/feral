@@ -1,25 +1,36 @@
-import pandas as pd
 import torchvision
-from transformers import AutoProcessor
 import os
-import decord
-from decord import VideoReader, cpu
+from decord import VideoReader
 import torch
-from torchvision.transforms.v2 import AutoAugment, TrivialAugmentWide
+from torchvision.transforms.v2 import TrivialAugmentWide
 from torch.nn.functional import one_hot
 import numpy as np
-from safetensors import safe_open
-import re
 import cv2
 import json
 import traceback
 import random
-from utils import get_class_frequencies
+import logging
+from feral.utils import get_class_frequencies
 
-def read_range_video_decord(path, frames):
-    vr = VideoReader(path)
+logger = logging.getLogger(__name__)
+
+def read_range_video_decord(path, frames, width=-1, height=-1):
+    vr = VideoReader(path, width=width, height=height)
     video = vr.get_batch(frames).asnumpy()  # (T, H, W, C)
     return torch.from_numpy(video).permute(0, 3, 1, 2)
+
+
+def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
+    """Target (width, height) for decord decode-time resize, matching
+    torchvision `build_resize_transform` output size."""
+    if resize_style == "square":
+        return resize_to, resize_to
+    if resize_style == "rectangle":
+        # Match torchvision Resize(int): shorter side -> resize_to, preserve AR.
+        if orig_h <= orig_w:
+            return round(orig_w * resize_to / orig_h), resize_to
+        return resize_to, round(orig_h * resize_to / orig_w)
+    raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
 def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
         # chunk_step = 1 -- pick every frame        XXXX
@@ -37,9 +48,18 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
-# def get_frame_count(video_path):
-#     vr = VideoReader(video_path)
-#     return len(vr)
+def build_resize_transform(resize_to, resize_style):
+    """Construct the torchvision Resize transform for a given `resize_style`.
+
+    - "square":    squish videos to ``(resize_to, resize_to)`` regardless of input aspect ratio.
+    - "rectangle": resize so the smallest side becomes ``resize_to``, preserving aspect ratio.
+    """
+    if resize_style == "square":
+        return torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
+    if resize_style == "rectangle":
+        return torchvision.transforms.v2.Resize(resize_to, antialias=True)
+    raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
+
 
 def get_frame_count(path: str):
     if not os.path.isfile(path):
@@ -51,33 +71,40 @@ def get_frame_count(path: str):
     finally:
         cap.release()
 
+
+def get_video_dims(path: str):
+    cap = cv2.VideoCapture(path)
+    try:
+        return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    finally:
+        cap.release()
+
 class ClsDataset():
-    def __init__(self, partition, label_json, do_aa, predict_per_item, 
-                 num_classes, prefix, resize_to, chunk_shift, chunk_length, 
-                 chunk_step, part_sample=1.0, subsample_keep_rare_threshold=None, **kwargs):
+    def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
+                 num_classes, prefix, resize_to, chunk_shift, chunk_length,
+                 chunk_step, resize_style="square", part_sample=1.0,
+                 subsample_keep_rare_threshold=None, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
         self.num_classes = num_classes
         self.is_multilabel = None
+        self.json_data = label_json_dict
         
-        with open(label_json, 'r') as f:
-            self.json_data = json.load(f)
-        
+        self.resize_to = resize_to
+        self.resize_style = resize_style
         self.parse_json(chunk_shift, chunk_length, chunk_step)
         if do_aa and self.partition == "train":
-            self.aug = TrivialAugmentWide() #AutoAugment()
+            self.aug = TrivialAugmentWide()
         else:
              self.aug = None
-        
-        self.resize = torchvision.transforms.v2.Resize((resize_to, resize_to), antialias=True)
-        # self.norm = torchvision.transforms.v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # smolvm
-        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa 
+
+        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
 
-        if part_sample < 1.0 and (partition == 'train'): # or partition == 'val'):
+        if part_sample < 1.0 and partition == 'train':
             if subsample_keep_rare_threshold is None:
-                print(f"{partition} using {100 * part_sample:.2f}% of chunks")
+                logger.info("%s using %.2f%% of chunks", partition, 100 * part_sample)
                 new_len = round(part_sample * len(self.samples))
                 new_indexes = random.sample(list(range(len(self.samples))), new_len)
                 self.samples = [self.samples[i] for i in new_indexes]
@@ -87,7 +114,8 @@ class ClsDataset():
                 flat_labels = all_labels.reshape(-1) if not self.is_multilabel else all_labels.reshape(-1, all_labels.shape[-1])
                 class_freqs = get_class_frequencies(flat_labels, num_classes=self.num_classes)
                 rare_classes = np.where(class_freqs < subsample_keep_rare_threshold)[0]
-                print(f"Rare class indexes (<{subsample_keep_rare_threshold * 100:.2f}%): {rare_classes.tolist()}. Class frequencies: {class_freqs}")
+                logger.info("Rare class indexes (<%.2f%%): %s. Class frequencies: %s",
+                            subsample_keep_rare_threshold * 100, rare_classes.tolist(), class_freqs)
                 
                 # Vectorized: find which chunks contain any rare class
                 if self.is_multilabel:
@@ -104,7 +132,8 @@ class ClsDataset():
                 sampled_common = np.random.choice(common_idx, expected_total - len(rare_idx), replace=False)
                 final_idx = np.concatenate([rare_idx, sampled_common])
                 np.random.shuffle(final_idx)
-                print(f"{partition} keeping {len(rare_idx)} rare + {len(sampled_common)} common = {len(final_idx)} chunks")
+                logger.info("%s keeping %d rare + %d common = %d chunks",
+                            partition, len(rare_idx), len(sampled_common), len(final_idx))
                 self.samples = [self.samples[i] for i in final_idx]
                 self.labels = [self.labels[i] for i in final_idx]
 
@@ -114,23 +143,27 @@ class ClsDataset():
                 cls_cnts = concat_labels.sum(axis=(0, 1))
             else:
                 cls_cnts = np.bincount(concat_labels.flatten())
-            print(f"{partition} class counts: {cls_cnts}")
+            logger.info("%s class counts: %s", partition, cls_cnts)
 
 
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
         self.samples = []
         self.labels = []
+        self.decode_size = None
 
         for fn in self.json_data['splits'][self.partition]:
-            frame_ids = get_frame_ids(
-                get_frame_count(os.path.join(self.prefix, fn)), chunk_shift, chunk_length, chunk_step
-            )
+            pth = os.path.join(self.prefix, fn)
+            video_total_frames = get_frame_count(pth)
+            if self.decode_size is None:
+                orig_w, orig_h = get_video_dims(pth)
+                self.decode_size = compute_decode_size(orig_w, orig_h, self.resize_to, self.resize_style)
+            if self.partition != 'inference':
+                json_total_frames = len(self.json_data['labels'][fn])
+                assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
+            frame_ids = get_frame_ids(video_total_frames, chunk_shift, chunk_length, chunk_step)
             for frames in frame_ids:
                 self.samples.append((fn, frames))
                 if self.partition != 'inference':
-                    json_total_frames = len(self.json_data['labels'][fn])
-                    video_total_frames = get_frame_count(os.path.join(self.prefix, fn))
-                    assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )
@@ -143,21 +176,17 @@ class ClsDataset():
             target = one_hot(target, self.num_classes)
         target = target.float() 
         return target
-    
-    def proc_names(self, sample):
-        if self.predict_per_item > 1:
-            sample = [f"{sample}_{i}" for i in range(self.predict_per_item)]
-        return sample
 
     def get_video(self, i):
         fn, frames = self.samples[i]
         pth = os.path.join(self.prefix, fn)
-        return read_range_video_decord(pth, frames), [f"{fn}_globalind_{frames[i]}_chunkind_{i}" for i in range(len(frames))]
-    
+        w, h = self.decode_size
+        # names are (filename as in labels.json, index of a frame within the video, index of a frame within a chunk)
+        return read_range_video_decord(pth, frames, width=w, height=h), [(fn, frames[i], i) for i in range(len(frames))]
+
     def get_item_simple(self, index):
         video, names = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
-        video = self.resize(video)
         outputs = self.norm(video * self.scale)
         if self.partition != "inference":
             label = self.labels[index]
@@ -173,13 +202,13 @@ class ClsDataset():
         try:
             return self.get_item_simple(index)
         except Exception:
-            print(f"Error loading index {index}:\n{traceback.format_exc()}")
+            logger.warning("Error loading index %d:\n%s", index, traceback.format_exc())
             for _ in range(3):
                 alt_index = np.random.randint(0, len(self))
                 try:
                     return self.get_item_simple(alt_index)
                 except Exception:
-                    print(f"Error loading index {alt_index}:\n{traceback.format_exc()}")
+                    logger.warning("Error loading index %d:\n%s", alt_index, traceback.format_exc())
             raise RuntimeError(f"Failed to load sample after multiple retries.\nLast error:\n{traceback.format_exc()}")
 
     
@@ -197,23 +226,3 @@ def collate_fn_inference(batch):
     tensors, names = zip(*batch)
     tensors = torch.stack(tensors)
     return tensors, names
-
-
-if __name__ == "__main__":
-    import yaml
-    # with open('/home/petr/video_understanding/configs/base_runs/worms_vjepa.yaml', 'r') as f:
-    with open('/home/petr/video_understanding/configs/base_runs/monkeys.yaml', 'r') as f:
-        cfg = yaml.safe_load(f)
-    ds = ClsDataset(partition='val', predict_per_item=64, num_classes=5, **cfg['data'])
-    outputs, label, names = ds[0]
-    print(outputs.shape)
-    # print(set([len(x) for x in ds.labels]))
-    # for i in range(len(ds)):
-    #     if len(ds.labels[i]) == 15:
-    #         print(i, ds.samples[i], get_frame_count(os.path.join(ds.prefix, ds.samples[i][0])), len(ds.h['labels'][ds.samples[i][0]]))
-
-    # for el in ds.h['labels'].keys():
-    #     a = get_frame_count(os.path.join(ds.prefix, el))
-    #     b = len(ds.h['labels'][el])
-    #     if a != b:
-    #         print(f"{el} true: {a}, json: {b}")

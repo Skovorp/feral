@@ -281,8 +281,8 @@ def validate_labels_json(labels_json, video_folder):
         errors.append(f"Unknown split names: {unknown}. Allowed: {valid_partitions}")
 
     for partition, videos in splits.items():
-        if not isinstance(videos, list) or len(videos) == 0:
-            errors.append(f"Split '{partition}' is empty. Remove the key if you don't need this partition.")
+        if not isinstance(videos, list):
+            errors.append(f"Split '{partition}' must be a list, got {type(videos).__name__}")
             continue
         for vid in videos:
             if vid not in labels and partition != 'inference':

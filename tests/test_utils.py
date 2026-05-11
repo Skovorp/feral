@@ -352,10 +352,15 @@ class TestValidateLabelsJson:
         with pytest.raises(ValueError, match="no entry in 'labels'"):
             validate_labels_json(data, video_folder=None)
 
-    def test_empty_split(self):
+    def test_empty_split_ok(self):
         data = _valid_singlelabel_json()
-        data["splits"]["train"] = []
-        with pytest.raises(ValueError, match="empty"):
+        data["splits"]["val"] = []
+        validate_labels_json(data, video_folder=None)
+
+    def test_split_not_a_list(self):
+        data = _valid_singlelabel_json()
+        data["splits"]["val"] = "vid1.mp4"
+        with pytest.raises(ValueError, match="must be a list"):
             validate_labels_json(data, video_folder=None)
 
     # --- video_folder frame count validation ---

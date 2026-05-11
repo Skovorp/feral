@@ -14,7 +14,7 @@ FERAL is an open-source toolkit for supervised animal behavior segmentation that
 
 The easiest way to run FERAL is directly in your browser through Google Colab, but you'll need a Colab Pro subscription to access good GPUs. Good news: Colab Pro is free for academics with an institutional email.
 
-[Open in Google Colab](https://colab.research.google.com/drive/1bJkHewHpEU7iJT3fIHd0YNrQJ9hkSEdu?usp=sharing)
+[Open in Google Colab](https://colab.research.google.com/drive/1wPe7MX3IiY3zsFkeTzLzHgynrtj-wXFP)
 
 > Use with an A100 or L4 GPU.
 

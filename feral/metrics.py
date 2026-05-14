@@ -1,6 +1,6 @@
 import numpy as np
 import json 
-from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score, precision_recall_curve
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
@@ -67,12 +67,12 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         per_class_f1 = f1_score(target_labels, pred_labels, labels=valid_classes, average=None)
         res = {}
         for cls_ind, f1_val in zip(valid_classes, per_class_f1):
-            res[f'{prefix}_f1_{class_names[cls_ind]}'] = f1_val
+            res[f'{prefix}/f1_{class_names[cls_ind]}'] = f1_val
 
-        res[f'{prefix}_precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        res[f'{prefix}/precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
     else:
         pred_labels = (preds > multilabel_threshold) * 1
@@ -90,14 +90,61 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
             precisions.append(p)
             recalls.append(r)
             f1s.append(f)
-            res[f'{prefix}_f1_{class_names[valid_class_ind]}'] = f
+            res[f'{prefix}/f1_{class_names[valid_class_ind]}'] = f
 
-        res[f'{prefix}_precision'] = sum(precisions) / len(precisions)
-        res[f'{prefix}_recall'] = sum(recalls) / len(recalls)
-        res[f'{prefix}_f1'] = sum(f1s) / len(f1s)
+        res[f'{prefix}/precision'] = sum(precisions) / len(precisions)
+        res[f'{prefix}/recall'] = sum(recalls) / len(recalls)
+        res[f'{prefix}/f1'] = sum(f1s) / len(f1s)
         # exact match: all class predictions must match all class targets
-        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
+
+def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+    # Only defined for multilabel — per-class thresholds aren't simultaneously
+    # applicable under single-label argmax, so the metric would be misleading.
+    if not is_multilabel:
+        return {}
+
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    valid_classes = [i for i, n in class_names.items() if n != 'other']
+
+    logits = generate_empty_logits(labels_json, partition)
+    logits = ensemble_predictions(ans, logits)
+
+    preds = []
+    targets = []
+    for fn in labels_json['splits'][partition]:
+        preds.append(logits[fn])
+        targets.append(labels_json['labels'][fn])
+    preds = np.concatenate(preds, 0)
+    targets = np.concatenate(targets, 0)
+
+    res = {}
+    f1s = []
+    for c in valid_classes:
+        y_true = targets[:, c].astype(int)
+        y_score = preds[:, c]
+
+        if y_true.sum() == 0:
+            # no positives -> F1 undefined; skip from average, log nan
+            res[f'{prefix}/best_f1_{class_names[c]}'] = float('nan')
+            res[f'{prefix}/best_thr_{class_names[c]}'] = float('nan')
+            continue
+
+        p, r, thr = precision_recall_curve(y_true, y_score)
+        f1 = 2 * p * r / np.clip(p + r, 1e-12, None)
+        best = int(np.argmax(f1))
+        # precision_recall_curve returns p/r with one extra element (recall=0, precision=1)
+        # at the end; thr has len(p) - 1. Map best back to a real threshold.
+        best_thr = float(thr[min(best, len(thr) - 1)]) if len(thr) else float('nan')
+
+        res[f'{prefix}/best_f1_{class_names[c]}'] = float(f1[best])
+        res[f'{prefix}/best_thr_{class_names[c]}'] = best_thr
+        f1s.append(float(f1[best]))
+
+    res[f'{prefix}/best_f1'] = (sum(f1s) / len(f1s)) if f1s else float('nan')
+    return res
+
 
 def ensemble_predictions(ans, logits):
     predict_per_item = max(x[0][2] for x in ans) + 1
@@ -258,8 +305,8 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
         ap = average_precision_score(targets[:, cls_ind], preds[:, cls_ind])
         if cls_name != 'other':
             aps.append(ap)
-        res[f'{prefix}_ap_{cls_name}'] = ap 
-    res[f'{prefix}_map'] = sum(aps) / len(aps)
+        res[f'{prefix}/ap_{cls_name}'] = ap
+    res[f'{prefix}/map'] = sum(aps) / len(aps)
     return res
 
 

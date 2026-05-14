@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 import random
 from feral.metrics import generate_empty_logits, ensemble_predictions
-from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics
+from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics, calculate_optimal_f1_metrics
 import sys
 import os
 import logging
@@ -97,7 +97,7 @@ def main(cfg):
             )
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'train'),
-                'train_loss': train_loss,
+                'train/loss': train_loss,
             }
             logger.info("%s", logs)
             wandb.log(logs)
@@ -123,35 +123,37 @@ def main(cfg):
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'val'),
                 **calculate_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val', cfg['multilabel_threshold']),
-                'val_frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
-                'val_loss': val_loss,
-                'val_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
+                **calculate_optimal_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val_optimal'),
+                'val/frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
+                'val/loss': val_loss,
+                'val/raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
             }
             if model_ema is not None:
                 ema_logs = {
-                    **calculate_multiclass_metrics(answers_ema, class_names, 'ema_val'),
-                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'ema_val', cfg['multilabel_threshold']),
-                    'ema_val_frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
-                    'ema_val_loss': ema_val_loss,
-                    'ema_val_raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
+                    **calculate_multiclass_metrics(answers_ema, class_names, 'val_ema'),
+                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'val_ema', cfg['multilabel_threshold']),
+                    **calculate_optimal_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'val_ema_optimal'),
+                    'val_ema/frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
+                    'val_ema/loss': ema_val_loss,
+                    'val_ema/raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
                 }
                 logs.update(ema_logs)
             logger.info("%s", logs)
             wandb.log(logs)
 
             # save best model
-            val_map = logs['val_frame_level_map']
-            ema_map = logs.get('ema_val_frame_level_map', -2)
+            val_map = logs['val/frame_level_map']
+            ema_map = logs.get('val_ema/frame_level_map', -2)
             best_map, saved = pick_and_save_best(
                 model, model_ema, val_map, ema_map, best_map, best_checkpoint_path,
                 model_save_metadata,
             )
             if saved == 'base':
                 epochs_without_updates = 0
-                logger.info("Epoch %d: Saved base model checkpoint with val_frame_level_map=%.4f", epoch, val_map)
+                logger.info("Epoch %d: Saved base model checkpoint with val/frame_level_map=%.4f", epoch, val_map)
             elif saved == 'ema':
                 epochs_without_updates = 0
-                logger.info("Epoch %d: Saved EMA model checkpoint with ema_val_frame_level_map=%.4f", epoch, ema_map)
+                logger.info("Epoch %d: Saved EMA model checkpoint with val_ema/frame_level_map=%.4f", epoch, ema_map)
             else:
                 epochs_without_updates += 1
                 logger.info("Epoch %d: Didnt improve for %d epochs", epoch, epochs_without_updates)
@@ -204,8 +206,9 @@ def main(cfg):
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'test'),
             **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test', cfg['multilabel_threshold']),
-            'test_frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
-            'test_raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
+            **calculate_optimal_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test_optimal'),
+            'test/frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
+            'test/raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
         }
         logger.info("%s", logs)
         wandb.log(logs)

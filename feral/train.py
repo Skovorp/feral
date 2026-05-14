@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 import random
 from feral.metrics import generate_empty_logits, ensemble_predictions
-from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics, calculate_optimal_f1_metrics
+from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics, calculate_optimal_f1_metrics, generate_multilabel_raster_plot, compute_optimal_per_class_thresholds
 import sys
 import os
 import logging
@@ -35,6 +35,33 @@ torch.backends.cuda.enable_mem_efficient_sdp(False)
 
 def _str_now():
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+
+
+def _add_raster_logs(logs, answers, labels_json, partition, prefix, optimal_prefix, multilabel_threshold):
+    """
+    Adds raster image entries to `logs` under `{prefix}/raster_plot` (regular
+    threshold) and, for multilabel, `{optimal_prefix}/raster_plot` (per-class
+    optimal-F1 thresholds). Every step is guarded; failures are logged but never
+    raised, so a broken plot can't kill training.
+    """
+    is_ml = labels_json['is_multilabel']
+    try:
+        if is_ml:
+            img = generate_multilabel_raster_plot(answers, labels_json, partition, multilabel_threshold)
+        else:
+            img = generate_raster_plot(answers, labels_json, partition)
+        logs[f'{prefix}/raster_plot'] = wandb.Image(img)
+    except Exception:
+        logger.exception("regular raster plot failed for %s", prefix)
+
+    if not is_ml or optimal_prefix is None:
+        return
+    try:
+        opt_thr = compute_optimal_per_class_thresholds(answers, labels_json, partition)
+        img = generate_multilabel_raster_plot(answers, labels_json, partition, opt_thr)
+        logs[f'{optimal_prefix}/raster_plot'] = wandb.Image(img)
+    except Exception:
+        logger.exception("optimal raster plot failed for %s", optimal_prefix)
 
 def main(cfg):
     check_environment(compile_enabled=cfg['training']['compile'])
@@ -126,8 +153,8 @@ def main(cfg):
                 **calculate_optimal_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val_optimal'),
                 'val/frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
                 'val/loss': val_loss,
-                'val/raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'val'))
             }
+            _add_raster_logs(logs, answers, labels_json, 'val', 'val', 'val_optimal', cfg['multilabel_threshold'])
             if model_ema is not None:
                 ema_logs = {
                     **calculate_multiclass_metrics(answers_ema, class_names, 'val_ema'),
@@ -135,8 +162,8 @@ def main(cfg):
                     **calculate_optimal_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'val_ema_optimal'),
                     'val_ema/frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
                     'val_ema/loss': ema_val_loss,
-                    'val_ema/raster_plot': wandb.Image(generate_raster_plot(answers_ema, labels_json, 'val'))
                 }
+                _add_raster_logs(ema_logs, answers_ema, labels_json, 'val', 'val_ema', 'val_ema_optimal', cfg['multilabel_threshold'])
                 logs.update(ema_logs)
             logger.info("%s", logs)
             wandb.log(logs)
@@ -208,8 +235,8 @@ def main(cfg):
             **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test', cfg['multilabel_threshold']),
             **calculate_optimal_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test_optimal'),
             'test/frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
-            'test/raster_plot': wandb.Image(generate_raster_plot(answers, labels_json, 'test'))
         }
+        _add_raster_logs(logs, answers, labels_json, 'test', 'test', 'test_optimal', cfg['multilabel_threshold'])
         logger.info("%s", logs)
         wandb.log(logs)
 

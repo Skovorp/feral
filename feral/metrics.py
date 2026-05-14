@@ -99,6 +99,41 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
 
+def _per_class_optimal_picks(ans, labels_json, partition):
+    """
+    Multilabel one-vs-rest sweep with precision_recall_curve. Returns
+    dict[class_ind] = (best_f1, best_threshold) for non-'other' classes with at
+    least one positive. Classes outside the dict are excluded (no positives).
+    """
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    valid_classes = [i for i, n in class_names.items() if n != 'other']
+
+    logits = generate_empty_logits(labels_json, partition)
+    logits = ensemble_predictions(ans, logits)
+
+    preds = np.concatenate([logits[fn] for fn in labels_json['splits'][partition]], 0)
+    targets = np.concatenate([labels_json['labels'][fn] for fn in labels_json['splits'][partition]], 0)
+
+    out = {}
+    for c in valid_classes:
+        y_true = targets[:, c].astype(int)
+        if y_true.sum() == 0:
+            continue
+        y_score = preds[:, c]
+        p, r, thr = precision_recall_curve(y_true, y_score)
+        f1 = 2 * p * r / np.clip(p + r, 1e-12, None)
+        best = int(np.argmax(f1))
+        if not len(thr):
+            continue
+        out[c] = (float(f1[best]), float(thr[min(best, len(thr) - 1)]))
+    return out
+
+
+def compute_optimal_per_class_thresholds(ans, labels_json, partition):
+    """Per-class optimal-F1 thresholds keyed by class_ind. Empty if no valid classes."""
+    return {c: t for c, (_f, t) in _per_class_optimal_picks(ans, labels_json, partition).items()}
+
+
 def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
     # Only defined for multilabel — per-class thresholds aren't simultaneously
     # applicable under single-label argmax, so the metric would be misleading.
@@ -107,41 +142,20 @@ def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, pre
 
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [i for i, n in class_names.items() if n != 'other']
-
-    logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, logits)
-
-    preds = []
-    targets = []
-    for fn in labels_json['splits'][partition]:
-        preds.append(logits[fn])
-        targets.append(labels_json['labels'][fn])
-    preds = np.concatenate(preds, 0)
-    targets = np.concatenate(targets, 0)
+    picks = _per_class_optimal_picks(ans, labels_json, partition)
 
     res = {}
     f1s = []
     for c in valid_classes:
-        y_true = targets[:, c].astype(int)
-        y_score = preds[:, c]
-
-        if y_true.sum() == 0:
-            # no positives -> F1 undefined; skip from average, log nan
-            res[f'{prefix}/best_f1_{class_names[c]}'] = float('nan')
-            res[f'{prefix}/best_thr_{class_names[c]}'] = float('nan')
-            continue
-
-        p, r, thr = precision_recall_curve(y_true, y_score)
-        f1 = 2 * p * r / np.clip(p + r, 1e-12, None)
-        best = int(np.argmax(f1))
-        # precision_recall_curve returns p/r with one extra element (recall=0, precision=1)
-        # at the end; thr has len(p) - 1. Map best back to a real threshold.
-        best_thr = float(thr[min(best, len(thr) - 1)]) if len(thr) else float('nan')
-
-        res[f'{prefix}/best_f1_{class_names[c]}'] = float(f1[best])
-        res[f'{prefix}/best_thr_{class_names[c]}'] = best_thr
-        f1s.append(float(f1[best]))
-
+        name = class_names[c]
+        if c in picks:
+            f1, thr = picks[c]
+            res[f'{prefix}/best_f1_{name}'] = f1
+            res[f'{prefix}/best_thr_{name}'] = thr
+            f1s.append(f1)
+        else:
+            res[f'{prefix}/best_f1_{name}'] = float('nan')
+            res[f'{prefix}/best_thr_{name}'] = float('nan')
     res[f'{prefix}/best_f1'] = (sum(f1s) / len(f1s)) if f1s else float('nan')
     return res
 
@@ -281,6 +295,104 @@ def generate_raster_plot(ans, labels_json, partition):
         ax.text(0.5, 0.5, 'Error. See logs', fontsize=40, ha='center', va='center', color='red')
         ax.axis('off')
         
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
+
+
+def generate_multilabel_raster_plot(ans, labels_json, partition, thresholds):
+    """
+    Multilabel ethogram: two stacked rasters (prediction on top, ground truth on
+    bottom), one row per class, cell colored when class is active. Black vlines
+    separate videos with their names written below. Always returns a PIL image —
+    on failure, an 'Error' image (logs traceback) so training never dies here.
+
+    thresholds: float OR dict[class_ind -> float]. Missing classes default to 0.5.
+    """
+    try:
+        class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+        n_classes = len(class_names)
+
+        if isinstance(thresholds, dict):
+            thr_arr = np.array(
+                [thresholds.get(i, 0.5) for i in range(n_classes)], dtype=float
+            )
+        else:
+            thr_arr = np.full(n_classes, float(thresholds))
+
+        logits = generate_empty_logits(labels_json, partition)
+        logits = ensemble_predictions(ans, logits)
+
+        video_names = list(logits.keys())
+        preds_list, targets_list = [], []
+        split_positions = []
+        cursor = 0
+        for name in video_names:
+            pred = (logits[name] > thr_arr[None, :]).astype(int)
+            label = np.array(labels_json['labels'][name]).astype(int)
+            assert label.ndim == 2 and label.shape[1] == n_classes, (
+                f"Multilabel raster expects labels of shape (T, {n_classes}); got {label.shape} for {name}"
+            )
+            preds_list.append(pred)
+            targets_list.append(label)
+            cursor += pred.shape[0]
+            split_positions.append(cursor)
+        split_positions = split_positions[:-1]
+
+        arr_pred = np.concatenate(preds_list, 0).T   # (C, T)
+        arr_label = np.concatenate(targets_list, 0).T  # (C, T)
+
+        base_cmap = cm.get_cmap('nipy_spectral')
+        color_range = np.linspace(0.1, 1.0, n_classes)
+        colors = [base_cmap(v) for v in color_range]
+        if 'other' in class_names.values():
+            idx = list(class_names.values()).index('other')
+            colors[idx], colors[-1] = colors[-1], colors[idx]
+
+        H, W = arr_pred.shape
+        rgb_pred = np.ones((H, W, 3), dtype=float)
+        rgb_label = np.ones((H, W, 3), dtype=float)
+        for c in range(n_classes):
+            color = np.array(colors[c][:3])
+            rgb_pred[c, arr_pred[c] == 1] = color
+            rgb_label[c, arr_label[c] == 1] = color
+
+        per_class_h = 0.6
+        fig_h = max(8.0, 2 * (n_classes * per_class_h + 1.0) + 4.0)
+        fig, axes = plt.subplots(2, 1, figsize=(32, fig_h), sharex=True)
+
+        for ax, rgb, title in zip(axes, [rgb_pred, rgb_label], ['prediction', 'ground truth']):
+            ax.imshow(rgb, aspect='auto', interpolation='nearest')
+            ax.set_yticks(range(n_classes))
+            ax.set_yticklabels([class_names[i] for i in range(n_classes)], fontsize=12)
+            ax.set_title(title, fontsize=16, pad=12)
+            ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            for pos in split_positions:
+                ax.axvline(pos, color='black', linewidth=2)
+
+        # video names well below the bottom raster
+        bottom_ax = axes[-1]
+        cursor = 0
+        for name in video_names:
+            length = logits[name].shape[0]
+            center = cursor + length // 2
+            wrapped = '\n'.join([name[i:i+15] for i in range(0, len(name), 15)])
+            bottom_ax.text(
+                center, n_classes + 0.5, wrapped,
+                ha='center', va='top', fontsize=11, clip_on=False,
+            )
+            cursor += length
+
+        plt.subplots_adjust(left=0.12, right=0.99, bottom=0.28, top=0.92, hspace=0.6)
+
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
+    except Exception:
+        traceback.print_exc()
+        fig, ax = plt.subplots(figsize=(32, 4))
+        ax.text(0.5, 0.5, 'Error. See logs', fontsize=40, ha='center', va='center', color='red')
+        ax.axis('off')
         res = fig2img(fig)
         plt.close(fig)
         return res

@@ -56,6 +56,13 @@ def test_multilabel_smoke():
 
 
 @_skip_no_fixtures
+def test_regression_smoke():
+    cfg = _build_smoke_cfg('labels_regression.json')
+    cfg['run_name'] = 'smoke_regression'
+    train_main(cfg)
+
+
+@_skip_no_fixtures
 @pytest.mark.parametrize("resize_to,resize_style", [
     (192, "square"),
     (256, "rectangle"),

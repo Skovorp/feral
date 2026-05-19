@@ -10,7 +10,8 @@ def _to_prob(output, is_multilabel):
 
 def train_one_epoch(model, loader, criterion, optimizer, scheduler, *,
                     mixup, model_ema, num_classes, is_multilabel,
-                    predict_per_item, device, log_fn=None, max_batches=None):
+                    predict_per_item, device, log_fn=None, max_batches=None,
+                    task='classification'):
     """Run one training epoch. Returns (answers, avg_loss).
 
     log_fn: optional callable invoked per batch with a dict of scalars
@@ -32,21 +33,26 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, *,
         optimizer.zero_grad()
 
         with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-            if mixup is not None:
-                N, T, C, A, B = data.shape
-                data = data.reshape(N, T, C, A * B)
-                data, mix = mixup(data, eye)
-                data = data.reshape(N, T, C, A, B)
-                if predict_per_item != 1:
-                    target = target.permute(1, 0, 2)
-                    target = mix.unsqueeze(0) @ target
-                    target = target.permute(1, 0, 2)
-                else:
-                    target = mix @ target
-            target = target.reshape(-1, num_classes)
-            output = model(data)
-            output_prob = _to_prob(output, is_multilabel)
-            loss = criterion(output, target)
+            if task == 'regression':
+                output = model(data)  # (B, num_targets), float
+                loss = criterion(output, target.float())
+                output_prob = output
+            else:
+                if mixup is not None:
+                    N, T, C, A, B = data.shape
+                    data = data.reshape(N, T, C, A * B)
+                    data, mix = mixup(data, eye)
+                    data = data.reshape(N, T, C, A, B)
+                    if predict_per_item != 1:
+                        target = target.permute(1, 0, 2)
+                        target = mix.unsqueeze(0) @ target
+                        target = target.permute(1, 0, 2)
+                    else:
+                        target = mix @ target
+                target = target.reshape(-1, num_classes)
+                output = model(data)
+                output_prob = _to_prob(output, is_multilabel)
+                loss = criterion(output, target)
 
         loss.backward()
         optimizer.step()
@@ -68,7 +74,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, *,
 
 
 def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
-             device, max_batches=None):
+             device, max_batches=None, task='classification'):
     """Run model over a labeled loader (val/test). Returns (answers, avg_loss).
 
     avg_loss is None if criterion is None.
@@ -81,13 +87,23 @@ def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
         for i, (data, target, names) in enumerate(tqdm(loader, total=len(loader))):
             data = data.to(device)
             target = target.to(device)
-            target = target.view(-1, num_classes)
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                output = model(data)
-                output_prob = _to_prob(output, is_multilabel)
-                answers.extend(prep_for_answers(output_prob, target, names))
-                if criterion is not None:
-                    losses.append(criterion(output, target).item())
+                if task == 'regression':
+                    output = model(data)  # (B, num_targets)
+                    target_f = target.float()
+                    # For regression, names from the dataset is a list of length chunk_length
+                    # but the prediction is per-chunk. Collapse to one name per chunk (first frame).
+                    chunk_names = [n[:1] for n in names]
+                    answers.extend(prep_for_answers(output, target_f, chunk_names))
+                    if criterion is not None:
+                        losses.append(criterion(output, target_f).item())
+                else:
+                    target = target.view(-1, num_classes)
+                    output = model(data)
+                    output_prob = _to_prob(output, is_multilabel)
+                    answers.extend(prep_for_answers(output_prob, target, names))
+                    if criterion is not None:
+                        losses.append(criterion(output, target).item())
 
             if max_batches is not None and i + 1 >= max_batches:
                 break
@@ -96,7 +112,8 @@ def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
     return answers, avg_loss
 
 
-def run_inference(model, loader, *, is_multilabel, device, max_batches=None):
+def run_inference(model, loader, *, is_multilabel, device, max_batches=None,
+                  task='classification'):
     """Run model over an unlabeled loader. Returns answers."""
     model.eval()
     answers = []
@@ -106,8 +123,12 @@ def run_inference(model, loader, *, is_multilabel, device, max_batches=None):
             data = data.to(device)
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                 output = model(data)
-                output_prob = _to_prob(output, is_multilabel)
-                answers.extend(prep_for_answers(output_prob, None, names))
+                if task == 'regression':
+                    chunk_names = [n[:1] for n in names]
+                    answers.extend(prep_for_answers(output, None, chunk_names))
+                else:
+                    output_prob = _to_prob(output, is_multilabel)
+                    answers.extend(prep_for_answers(output_prob, None, names))
 
             if max_batches is not None and i + 1 >= max_batches:
                 break

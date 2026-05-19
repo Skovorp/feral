@@ -1,0 +1,119 @@
+{
+  "task": "regression",
+  "target_names": {
+    "0": "gait",
+    "1": "posture"
+  },
+  "normalization": {
+    "mean": [
+      0.0,
+      0.0
+    ],
+    "std": [
+      1.0,
+      1.0
+    ]
+  },
+  "labels": {
+    "synthetic_00.mp4": [
+      0.6888,
+      0.5159
+    ],
+    "synthetic_01.mp4": [
+      -0.1589,
+      -0.4822
+    ],
+    "synthetic_02.mp4": [
+      0.0225,
+      -0.1901
+    ],
+    "synthetic_03.mp4": [
+      0.5676,
+      -0.3934
+    ],
+    "synthetic_04.mp4": [
+      -0.0468,
+      0.1668
+    ],
+    "synthetic_05.mp4": [
+      0.8162,
+      0.0094
+    ],
+    "synthetic_06.mp4": [
+      -0.4363,
+      0.5116
+    ],
+    "synthetic_07.mp4": [
+      0.2367,
+      -0.499
+    ],
+    "synthetic_08.mp4": [
+      0.8195,
+      0.9656
+    ],
+    "synthetic_09.mp4": [
+      0.6204,
+      0.8043
+    ],
+    "synthetic_10.mp4": [
+      -0.3797,
+      0.4597
+    ],
+    "synthetic_11.mp4": [
+      0.7977,
+      0.368
+    ],
+    "synthetic_12.mp4": [
+      -0.0557,
+      -0.7986
+    ],
+    "synthetic_13.mp4": [
+      -0.1317,
+      0.2218
+    ],
+    "synthetic_14.mp4": [
+      0.826,
+      0.9332
+    ],
+    "synthetic_15.mp4": [
+      -0.046,
+      0.7306
+    ],
+    "synthetic_16.mp4": [
+      -0.479,
+      0.6101
+    ],
+    "synthetic_17.mp4": [
+      0.0974,
+      -0.9719
+    ]
+  },
+  "splits": {
+    "train": [
+      "synthetic_00.mp4",
+      "synthetic_01.mp4",
+      "synthetic_02.mp4",
+      "synthetic_03.mp4",
+      "synthetic_04.mp4",
+      "synthetic_05.mp4",
+      "synthetic_06.mp4",
+      "synthetic_07.mp4",
+      "synthetic_08.mp4",
+      "synthetic_09.mp4",
+      "synthetic_10.mp4",
+      "synthetic_11.mp4"
+    ],
+    "val": [
+      "synthetic_12.mp4",
+      "synthetic_13.mp4",
+      "synthetic_14.mp4"
+    ],
+    "test": [
+      "synthetic_15.mp4",
+      "synthetic_16.mp4"
+    ],
+    "inference": [
+      "synthetic_17.mp4"
+    ]
+  }
+}

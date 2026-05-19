@@ -15,7 +15,7 @@ from feral.dataset import (
     collate_fn_inference,
 )
 from feral.loops import run_inference
-from feral.metrics import save_inference_results
+from feral.metrics import save_inference_results, ensemble_regression_predictions
 from feral.modeling import load_model_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s",
@@ -43,6 +43,17 @@ def build_inference_labels_json(video_filenames, class_names, is_multilabel):
     return {
         'class_names': class_names,
         'is_multilabel': is_multilabel,
+        'labels': {},
+        'splits': {
+            'inference': video_filenames,
+        },
+    }
+
+
+def build_inference_regression_labels_json(video_filenames, target_names):
+    return {
+        'task': 'regression',
+        'target_names': target_names,
         'labels': {},
         'splits': {
             'inference': video_filenames,
@@ -87,6 +98,47 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
             "contain class_names or is_multilabel. Please use a checkpoint saved with "
             "the new format, or provide a labels.json and use the full training pipeline."
         )
+    task = metadata.get('task', 'classification')
+
+    if task == 'regression':
+        target_names = metadata['target_names']
+        num_targets = len(target_names)
+        logger.info("Checkpoint metadata: regression with %d target(s): %s", num_targets, target_names)
+        labels_json = build_inference_regression_labels_json(video_filenames, target_names)
+        dataset = ClsDataset(
+            partition='inference',
+            label_json_dict=labels_json,
+            do_aa=False,
+            predict_per_item=cfg['predict_per_item'],
+            num_classes=0,
+            prefix=video_folder,
+            resize_to=cfg['data']['resize_to'],
+            resize_style=cfg['data'].get('resize_style', 'square'),
+            chunk_shift=cfg['data']['chunk_shift'],
+            chunk_length=cfg['data']['chunk_length'],
+            chunk_step=cfg['data']['chunk_step'],
+            task='regression',
+            num_targets=num_targets,
+        )
+        loader = DataLoader(
+            dataset, batch_size=batch_size, shuffle=False,
+            num_workers=num_workers, collate_fn=collate_fn_inference,
+        )
+        logger.info("Running inference on %d chunks...", len(dataset))
+        answers = run_inference(model, loader, is_multilabel=False, device=device, task='regression')
+        if output is None:
+            folder_name = os.path.basename(os.path.normpath(video_folder))
+            output = f"inference_{folder_name}.json"
+        os.makedirs(os.path.dirname(output) or '.', exist_ok=True)
+        preds_per_video = ensemble_regression_predictions(answers)
+        with open(output, 'w') as f:
+            json.dump({
+                'preds': {fn: v.tolist() for fn, v in preds_per_video.items()},
+                'target_names': target_names,
+            }, f)
+        logger.info("Results saved to %s", output)
+        return
+
     class_names = metadata['class_names']
     is_multilabel = metadata['is_multilabel']
     num_classes = len(class_names)

@@ -6,6 +6,20 @@ import numpy as np
 import random
 import os
 
+def is_classification(labels_json):
+    """True when the labels_json is classification, False for regression.
+
+    Classification is the default. We treat the JSON as classification if it
+    has a 'task' set to 'classification' OR (back-compat) if it has a
+    'class_names' field. Regression JSONs are those without either marker
+    (they use 'target_names' + per-video float labels instead).
+    """
+    task = labels_json.get('task')
+    if task is not None:
+        return task == 'classification'
+    return 'class_names' in labels_json
+
+
 @torch.no_grad()
 def prep_for_answers(outputs, targets, names=None):
     outputs = outputs.cpu().detach().tolist()
@@ -211,6 +225,9 @@ def pick_and_save_best(model, model_ema, val_map, ema_map, best_map, path, metad
 def validate_labels_json(labels_json, video_folder):
     """Validate the label JSON up-front so users get clear errors instead of
     cryptic crashes deep in training."""
+    if not is_classification(labels_json):
+        _validate_regression_labels_json(labels_json, video_folder)
+        return
     errors = []
 
     # --- top-level keys ---
@@ -319,6 +336,81 @@ def validate_labels_json(labels_json, video_folder):
     if errors:
         raise ValueError(
             f"Label JSON validation failed with {len(errors)} error(s):\n" +
+            "\n".join(f"  - {e}" for e in errors)
+        )
+
+
+def _validate_regression_labels_json(labels_json, video_folder):
+    """Validate a regression labels_json: target_names + per-video float lists."""
+    errors = []
+
+    required_keys = {'target_names', 'labels', 'splits'}
+    missing = required_keys - set(labels_json.keys())
+    if missing:
+        raise ValueError(f"Regression label JSON missing required top-level keys: {missing}")
+
+    target_names_raw = labels_json['target_names']
+    if not isinstance(target_names_raw, dict) or len(target_names_raw) == 0:
+        errors.append("'target_names' must be a non-empty dict")
+        num_targets = 0
+    else:
+        try:
+            ids = sorted(int(k) for k in target_names_raw.keys())
+        except (ValueError, TypeError):
+            errors.append(
+                f"'target_names' keys must be integer strings, got: {list(target_names_raw.keys())}"
+            )
+            ids = None
+        if ids is not None:
+            expected = list(range(len(ids)))
+            if ids != expected:
+                errors.append(
+                    f"'target_names' IDs must be sequential starting from 0. "
+                    f"Expected {expected}, got {ids}"
+                )
+        num_targets = len(target_names_raw)
+
+    labels = labels_json.get('labels', {})
+    if not isinstance(labels, dict):
+        errors.append("'labels' must be a dict mapping video filenames to a per-video list of floats")
+    elif num_targets > 0:
+        for vid, vec in labels.items():
+            if not isinstance(vec, list) or len(vec) != num_targets:
+                errors.append(
+                    f"'{vid}': regression labels must be a list of {num_targets} number(s), "
+                    f"got {type(vec).__name__} of length {len(vec) if isinstance(vec, list) else 'n/a'}"
+                )
+                continue
+            bad = [i for i, v in enumerate(vec) if not isinstance(v, (int, float)) or isinstance(v, bool)]
+            if bad:
+                errors.append(
+                    f"'{vid}': regression label values must be numeric. Bad indices: {bad}"
+                )
+
+    splits = labels_json.get('splits', {})
+    valid_partitions = {'train', 'val', 'test', 'inference'}
+    unknown = set(splits.keys()) - valid_partitions
+    if unknown:
+        errors.append(f"Unknown split names: {unknown}. Allowed: {valid_partitions}")
+
+    for partition, videos in splits.items():
+        if not isinstance(videos, list):
+            errors.append(f"Split '{partition}' must be a list, got {type(videos).__name__}")
+            continue
+        for vid in videos:
+            if vid not in labels and partition != 'inference':
+                errors.append(f"Split '{partition}' references '{vid}' which has no entry in 'labels'")
+
+    if video_folder:
+        for partition, videos in splits.items():
+            for vid in videos:
+                vid_path = os.path.join(video_folder, vid)
+                if not os.path.isfile(vid_path):
+                    errors.append(f"Split '{partition}' references '{vid}' but file not found: {vid_path}")
+
+    if errors:
+        raise ValueError(
+            f"Regression label JSON validation failed with {len(errors)} error(s):\n" +
             "\n".join(f"  - {e}" for e in errors)
         )
 

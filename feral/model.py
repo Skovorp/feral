@@ -35,22 +35,41 @@ class FeralModel(nn.Module):
             fc_drop_rate,
             freeze_encoder_layers=0,
             pretrained=True,
+            task='classification',
+            num_targets=None,
             **kwargs):
         super().__init__()
+        self.task = task
+        self.num_targets = num_targets
         self.backbone = BackboneAdapter(backbone, pretrained=pretrained)
         d = self.backbone.hidden_dim
 
-        self.clip_projector = AttentionPoolingBlockCustom(
-            embed_dim=d, num_heads=16, out_tokens=predict_per_item
-        )
-        self.fc_norm = nn.BatchNorm1d(d)
-        self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
-        self.head = nn.Linear(d, num_classes)
+        if task == 'regression':
+            assert num_targets is not None and num_targets > 0, \
+                f"num_targets must be a positive int for regression, got {num_targets!r}"
+            self.clip_projector = AttentionPoolingBlockCustom(
+                embed_dim=d, num_heads=16, out_tokens=num_targets
+            )
+            self.fc_norm = nn.BatchNorm1d(d)
+            self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
+            self.head = nn.Linear(d, 1)
+        else:
+            self.clip_projector = AttentionPoolingBlockCustom(
+                embed_dim=d, num_heads=16, out_tokens=predict_per_item
+            )
+            self.fc_norm = nn.BatchNorm1d(d)
+            self.fc_dropout = nn.Dropout(p=fc_drop_rate) if fc_drop_rate > 0 else nn.Identity()
+            self.head = nn.Linear(d, num_classes)
         self.backbone.freeze_encoder(freeze_encoder_layers)
 
     def forward(self, x):
+        B = x.shape[0]
         x = self.backbone(x)
         x = self.clip_projector(x)
         x = self.fc_norm(x)
         x = self.head(self.fc_dropout(x))
+        if self.task == 'regression':
+            # clip_projector flattens (B, num_targets, d) -> (B*num_targets, d);
+            # the (B*num_targets, 1) head output becomes (B, num_targets).
+            x = x.view(B, self.num_targets)
         return x

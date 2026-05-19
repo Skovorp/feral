@@ -8,12 +8,12 @@ from transformers import get_cosine_schedule_with_warmup
 
 from feral.backbones import warn_if_resize_mismatch
 from feral.model import FeralModel
-from feral.utils import get_weights
+from feral.utils import get_weights, is_classification
 
 logger = logging.getLogger(__name__)
 
 
-def build_model(cfg, num_classes, device, *, with_ema=True):
+def build_model(cfg, num_classes, device, *, with_ema=True, task='classification', num_targets=None):
     """Construct FeralModel, move to device, optionally compile and wrap in EMA.
 
     Returns (model, model_ema). model_ema is None if cfg['ema_decay'] is None
@@ -24,6 +24,8 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
         backbone=cfg['backbone'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
+        task=task,
+        num_targets=num_targets,
         **cfg['model'],
     )
     model.to(device)
@@ -57,12 +59,22 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
 
     if isinstance(raw, dict) and 'state_dict' in raw:
         state_dict = raw['state_dict']
-        metadata = {
-            'class_names': raw['class_names'],
-            'is_multilabel': raw['is_multilabel'],
-            'cfg': raw.get('cfg'),
-        }
-        num_classes = len(metadata['class_names'])
+        task = raw.get('task', 'classification')
+        if task == 'regression':
+            metadata = {
+                'task': 'regression',
+                'target_names': raw['target_names'],
+                'cfg': raw.get('cfg'),
+            }
+            num_classes = 0  # not used for regression
+        else:
+            metadata = {
+                'task': 'classification',
+                'class_names': raw['class_names'],
+                'is_multilabel': raw['is_multilabel'],
+                'cfg': raw.get('cfg'),
+            }
+            num_classes = len(metadata['class_names'])
     else:
         logging.warning(
             "Checkpoint '%s' is a legacy format (bare state_dict) with no "
@@ -77,10 +89,15 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
         metadata = None
 
     warn_if_resize_mismatch(cfg)
+    model_kwargs = {}
+    if metadata is not None and metadata.get('task') == 'regression':
+        model_kwargs['task'] = 'regression'
+        model_kwargs['num_targets'] = len(metadata['target_names'])
     model = FeralModel(
         backbone=cfg['backbone'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
+        **model_kwargs,
         **cfg['model'],
     )
     try:
@@ -102,14 +119,18 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
 
 def build_training_objects(cfg, model, train_dataset, train_loader, labels_json, device):
     """Build criterion, optimizer, lr_scheduler, mixup. Returns dict-of-objects."""
-    class_weights = get_weights(train_dataset.json_data, cfg['model']['class_weights'], device)
-    if labels_json['is_multilabel']:
-        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+    is_cls = is_classification(labels_json)
+    if is_cls:
+        class_weights = get_weights(train_dataset.json_data, cfg['model']['class_weights'], device)
+        if labels_json['is_multilabel']:
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
+        else:
+            criterion = torch.nn.CrossEntropyLoss(
+                label_smoothing=cfg['training']['label_smoothing'],
+                weight=class_weights,
+            )
     else:
-        criterion = torch.nn.CrossEntropyLoss(
-            label_smoothing=cfg['training']['label_smoothing'],
-            weight=class_weights,
-        )
+        criterion = torch.nn.MSELoss()
 
     optimizer = AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -123,7 +144,9 @@ def build_training_objects(cfg, model, train_dataset, train_loader, labels_json,
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps,
     )
 
-    mixup = (None if cfg['mixup_alpha'] is None
-             else MixUp(alpha=cfg['mixup_alpha'], num_classes=cfg['training']['train_bs']))
+    if not is_cls or cfg['mixup_alpha'] is None:
+        mixup = None
+    else:
+        mixup = MixUp(alpha=cfg['mixup_alpha'], num_classes=cfg['training']['train_bs'])
 
     return criterion, optimizer, lr_scheduler, mixup

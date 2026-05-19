@@ -1,6 +1,6 @@
 import numpy as np
-import json 
-from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score
+import json
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score, mean_squared_error, mean_absolute_error, r2_score
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
@@ -247,6 +247,98 @@ def fig2img(fig):
     buf.seek(0)
     img = PIL.Image.open(buf)
     return img
+
+def calculate_regression_metrics(ans, target_names, prefix=''):
+    """Per-target regression metrics from chunk-level answers.
+
+    Each entry in `ans` is ((fn, chunk_idx), output_vec, target_vec).
+    Returns MSE, MAE, R^2, Pearson r per target and macro-averaged.
+    """
+    preds = np.array([x[-2] for x in ans], dtype=np.float64)
+    targets = np.array([x[-1] for x in ans], dtype=np.float64)
+
+    res = {}
+    mses, maes, r2s, corrs = [], [], [], []
+    for cls_ind, cls_name in target_names.items():
+        p = preds[:, cls_ind]
+        t = targets[:, cls_ind]
+        mse = float(mean_squared_error(t, p))
+        mae = float(mean_absolute_error(t, p))
+        r2 = float(r2_score(t, p)) if t.std() > 0 else float('nan')
+        if t.std() > 0 and p.std() > 0:
+            corr = float(np.corrcoef(t, p)[0, 1])
+        else:
+            corr = float('nan')
+        res[f'{prefix}_mse_{cls_name}'] = mse
+        res[f'{prefix}_mae_{cls_name}'] = mae
+        res[f'{prefix}_r2_{cls_name}'] = r2
+        res[f'{prefix}_corr_{cls_name}'] = corr
+        mses.append(mse)
+        maes.append(mae)
+        if not np.isnan(r2):
+            r2s.append(r2)
+        if not np.isnan(corr):
+            corrs.append(corr)
+    res[f'{prefix}_mse'] = float(np.mean(mses))
+    res[f'{prefix}_mae'] = float(np.mean(maes))
+    res[f'{prefix}_r2'] = float(np.mean(r2s)) if r2s else float('nan')
+    res[f'{prefix}_corr'] = float(np.mean(corrs)) if corrs else float('nan')
+    return res
+
+
+def ensemble_regression_predictions(ans):
+    """Average chunk-level regression predictions per video.
+
+    Returns dict {fn: np.array(num_targets)} of per-video mean predictions.
+    """
+    from collections import defaultdict
+    by_video = defaultdict(list)
+    for entry in ans:
+        name = entry[0]
+        out = entry[1]
+        fn = name[0] if isinstance(name, (tuple, list)) else name
+        by_video[fn].append(np.asarray(out, dtype=np.float64))
+    return {fn: np.mean(np.stack(lst, axis=0), axis=0) for fn, lst in by_video.items()}
+
+
+def calculate_video_level_regression_metrics(ans, labels_json, partition, target_names, prefix=''):
+    """Video-level regression metrics: average chunk preds per video, then
+    compute MSE/MAE/R^2/corr against the per-video targets in labels_json."""
+    preds_by_video = ensemble_regression_predictions(ans)
+    fns = [fn for fn in labels_json['splits'][partition] if fn in preds_by_video]
+    if not fns:
+        return {}
+    preds = np.stack([preds_by_video[fn] for fn in fns], axis=0)
+    targets = np.array([labels_json['labels'][fn] for fn in fns], dtype=np.float64)
+
+    res = {}
+    mses, maes, r2s, corrs = [], [], [], []
+    for cls_ind, cls_name in target_names.items():
+        p = preds[:, cls_ind]
+        t = targets[:, cls_ind]
+        mse = float(mean_squared_error(t, p))
+        mae = float(mean_absolute_error(t, p))
+        r2 = float(r2_score(t, p)) if t.std() > 0 else float('nan')
+        if t.std() > 0 and p.std() > 0:
+            corr = float(np.corrcoef(t, p)[0, 1])
+        else:
+            corr = float('nan')
+        res[f'{prefix}_vid_mse_{cls_name}'] = mse
+        res[f'{prefix}_vid_mae_{cls_name}'] = mae
+        res[f'{prefix}_vid_r2_{cls_name}'] = r2
+        res[f'{prefix}_vid_corr_{cls_name}'] = corr
+        mses.append(mse)
+        maes.append(mae)
+        if not np.isnan(r2):
+            r2s.append(r2)
+        if not np.isnan(corr):
+            corrs.append(corr)
+    res[f'{prefix}_vid_mse'] = float(np.mean(mses))
+    res[f'{prefix}_vid_mae'] = float(np.mean(maes))
+    res[f'{prefix}_vid_r2'] = float(np.mean(r2s)) if r2s else float('nan')
+    res[f'{prefix}_vid_corr'] = float(np.mean(corrs)) if corrs else float('nan')
+    return res
+
 
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
     preds = np.array([x[-2] for x in ans])

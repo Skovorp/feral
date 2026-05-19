@@ -83,14 +83,17 @@ class ClsDataset():
     def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
                  num_classes, prefix, resize_to, chunk_shift, chunk_length,
                  chunk_step, resize_style="square", part_sample=1.0,
-                 subsample_keep_rare_threshold=None, **kwargs):
+                 subsample_keep_rare_threshold=None, task='classification',
+                 num_targets=None, **kwargs):
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
         self.num_classes = num_classes
         self.is_multilabel = None
         self.json_data = label_json_dict
-        
+        self.task = task
+        self.num_targets = num_targets
+
         self.resize_to = resize_to
         self.resize_style = resize_style
         self.parse_json(chunk_shift, chunk_length, chunk_step)
@@ -101,6 +104,22 @@ class ClsDataset():
 
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
+
+        if self.task == 'regression':
+            if part_sample < 1.0 and partition == 'train':
+                logger.info("%s using %.2f%% of chunks", partition, 100 * part_sample)
+                new_len = round(part_sample * len(self.samples))
+                new_indexes = random.sample(list(range(len(self.samples))), new_len)
+                self.samples = [self.samples[i] for i in new_indexes]
+                self.labels = [self.labels[i] for i in new_indexes]
+            if partition != 'inference':
+                arr = np.array(self.labels)
+                logger.info(
+                    "%s regression targets: n=%d shape=%s mean=%s std=%s min=%s max=%s",
+                    partition, arr.shape[0], arr.shape, arr.mean(0), arr.std(0),
+                    arr.min(0), arr.max(0),
+                )
+            return
 
         if part_sample < 1.0 and partition == 'train':
             if subsample_keep_rare_threshold is None:
@@ -157,6 +176,25 @@ class ClsDataset():
             if self.decode_size is None:
                 orig_w, orig_h = get_video_dims(pth)
                 self.decode_size = compute_decode_size(orig_w, orig_h, self.resize_to, self.resize_style)
+            if self.task == 'regression':
+                if self.partition != 'inference':
+                    video_target = self.json_data['labels'][fn]
+                    assert isinstance(video_target, list), (
+                        f"Regression label for {fn} must be a list of floats, got {type(video_target).__name__}"
+                    )
+                    if self.num_targets is not None:
+                        assert len(video_target) == self.num_targets, (
+                            f"Regression label for {fn} has {len(video_target)} values, "
+                            f"expected {self.num_targets}"
+                        )
+                frame_ids = get_frame_ids(video_total_frames, chunk_shift, chunk_length, chunk_step)
+                for frames in frame_ids:
+                    self.samples.append((fn, frames))
+                    if self.partition != 'inference':
+                        self.labels.append(video_target)
+                continue
+
+            # classification path
             if self.partition != 'inference':
                 json_total_frames = len(self.json_data['labels'][fn])
                 assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
@@ -167,14 +205,16 @@ class ClsDataset():
                     self.labels.append(
                         [self.json_data['labels'][fn][i] for i in frames]
                     )
-        if self.partition != 'inference':
+        if self.partition != 'inference' and self.task != 'regression':
             self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
 
     def proc_target(self, target):
+        if self.task == 'regression':
+            return torch.tensor(target).float()
         target = torch.tensor(target).long()
         if len(target.shape) == 1:
             target = one_hot(target, self.num_classes)
-        target = target.float() 
+        target = target.float()
         return target
 
     def get_video(self, i):

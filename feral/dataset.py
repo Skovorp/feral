@@ -2,7 +2,9 @@ import torchvision
 import os
 from decord import VideoReader
 import torch
-from torchvision.transforms.v2 import TrivialAugmentWide
+from torchvision.transforms.v2 import (
+    TrivialAugmentWide, RandomResizedCrop, ColorJitter, RandomErasing, Compose,
+)
 from torch.nn.functional import one_hot
 import numpy as np
 import cv2
@@ -97,8 +99,17 @@ class ClsDataset():
         self.resize_to = resize_to
         self.resize_style = resize_style
         self.parse_json(chunk_shift, chunk_length, chunk_step)
+        aug_profile = kwargs.get('aug_profile', 'trivial')
         if do_aa and self.partition == "train":
-            self.aug = TrivialAugmentWide()
+            if aug_profile == 'strong':
+                self.aug = Compose([
+                    RandomResizedCrop(size=resize_to, scale=(0.5, 1.0), antialias=True),
+                    ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+                    TrivialAugmentWide(),
+                    RandomErasing(p=0.25, scale=(0.02, 0.2)),
+                ])
+            else:
+                self.aug = TrivialAugmentWide()
         else:
              self.aug = None
 
@@ -188,7 +199,10 @@ class ClsDataset():
                             f"expected {self.num_targets}"
                         )
                 frame_ids = get_frame_ids(video_total_frames, chunk_shift, chunk_length, chunk_step)
+                mask = self.json_data.get('frame_mask', {}).get(fn)
                 for frames in frame_ids:
+                    if mask is not None and not all(mask[i] for i in frames):
+                        continue
                     self.samples.append((fn, frames))
                     if self.partition != 'inference':
                         self.labels.append(video_target)
@@ -199,7 +213,10 @@ class ClsDataset():
                 json_total_frames = len(self.json_data['labels'][fn])
                 assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
             frame_ids = get_frame_ids(video_total_frames, chunk_shift, chunk_length, chunk_step)
+            mask = self.json_data.get('frame_mask', {}).get(fn)
             for frames in frame_ids:
+                if mask is not None and not all(mask[i] for i in frames):
+                    continue
                 self.samples.append((fn, frames))
                 if self.partition != 'inference':
                     self.labels.append(

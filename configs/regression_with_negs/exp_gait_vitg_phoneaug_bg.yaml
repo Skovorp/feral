@@ -1,0 +1,47 @@
+run_name: exp_gait_vitg_phoneaug_bg
+backbone: vjepa2_1_vitg_384
+predict_per_item: 64
+wandb:
+  key: 9ce4b10bf35b56281619a07601ec9c274604c9f6
+  entity: sposiboh
+  project: dikiy
+model:
+  fc_drop_rate: 0.5
+  class_weights: inv_freq_sqrt
+  freeze_encoder_layers: 37
+data:
+  prefix: /workspace/data_gaitcrop
+  label_json: /workspace/labels/feral_gait_labels_phoneaug_cleanval.json
+  chunk_length: 64
+  chunk_shift: 32
+  chunk_step: 1
+  resize_to: 256
+  resize_style: square
+  do_aa: true
+  aug_profile: phone
+  bg_replace: true
+  mask_dir: /workspace/masks
+  bg_dir: /workspace/clean_bg
+  bg_replace_p: 0.6
+  part_sample: 1
+  subsample_keep_rare_threshold: null
+  cache_entire_dataset: true
+training:
+  epochs: 10
+  train_bs: 4
+  val_bs: 8
+  num_workers: 16
+  part_warmup: 0.2
+  lr: 2.0e-5
+  weight_decay: 0.1
+  label_smoothing: 0.1
+  compile: true
+  patience: 3
+mixup_alpha: 0.8
+target_noise_std: 0.0
+ema_decay: null
+seed: 0
+device: cuda
+starting_checkpoint: null
+max_batches: null
+multilabel_threshold: 0.85

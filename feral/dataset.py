@@ -108,11 +108,18 @@ class ClsDataset():
                     TrivialAugmentWide(),
                     RandomErasing(p=0.25, scale=(0.02, 0.2)),
                 ])
+            elif aug_profile == "phone":
+                from feral.phone_aug import build_phone_aug
+                self.aug = build_phone_aug(resize_to)
             else:
                 self.aug = TrivialAugmentWide()
         else:
              self.aug = None
 
+        self.bg_replacer = None
+        if kwargs.get('bg_replace') and self.partition == 'train':
+            from feral.phone_aug import build_bg_replacer
+            self.bg_replacer = build_bg_replacer(kwargs.get('mask_dir', '/root/masks'), kwargs.get('bg_dir', '/root/clean_bg'), kwargs.get('bg_replace_p', 0.5))
         self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
         self.scale = 0.00392156862745098
 
@@ -243,6 +250,8 @@ class ClsDataset():
 
     def get_item_simple(self, index):
         video, names = self.get_video(index)
+        if self.bg_replacer is not None:
+            video = self.bg_replacer(video, names)
         video = video if self.aug is None else self.aug(video)
         outputs = self.norm(video * self.scale)
         if self.partition != "inference":

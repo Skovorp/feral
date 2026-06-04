@@ -36,7 +36,7 @@ QA_DIR   = os.environ.get("GAIT_QA",    "/workspace/gait_qa")
 MAXSIDE  = int(os.environ.get("SAM_MAXSIDE", "384"))
 OUT      = int(os.environ.get("CROP_OUT", "384"))
 MASK_RES = 256
-PAD      = 1.45
+PAD      = 1.30
 SIGMA    = 8.0
 dev = "cuda"
 
@@ -70,16 +70,38 @@ def read_frames(path, maxside):
     return frames, fps
 
 
-def largest_person_mask(a):
-    # a: (n_obj,H,W) float or (H,W). return bool (H,W) of the biggest object.
+def person_candidates(a):
+    # a: (n_obj,H,W) float or (H,W). return list of (mask_bool, area, (cy,cx)).
     if a is None:
-        return None
-    if a.ndim == 3:
-        if a.shape[0] == 0:
-            return None
-        areas = (a > 0.5).reshape(a.shape[0], -1).sum(1)
-        return (a[int(areas.argmax())] > 0.5)
-    return a > 0.5
+        return []
+    if a.ndim == 2:
+        a = a[None]
+    out = []
+    for k in range(a.shape[0]):
+        m = a[k] > 0.5
+        ar = int(m.sum())
+        if ar < 50:
+            continue
+        ys, xs = np.where(m)
+        out.append((m, ar, (ys.mean(), xs.mean())))
+    return out
+
+
+def pick_patient(cands, prev_cxy, H, W):
+    # Greedy single-patient tracker: follow prev centroid; else prefer the
+    # largest + most-central person (the patient dominates and walks centrally;
+    # peripheral clinicians are smaller/off to the side).
+    if not cands:
+        return None, prev_cxy
+    if prev_cxy is not None:
+        amax = max(c[1] for c in cands)
+        near = [c for c in cands if c[1] > 0.25 * amax]  # ignore tiny distractors
+        c = min(near, key=lambda c: (c[2][0] - prev_cxy[0]) ** 2 + (c[2][1] - prev_cxy[1]) ** 2)
+    else:
+        cy0, cx0 = H / 2, W / 2
+        amax = max(c[1] for c in cands)
+        c = max(cands, key=lambda c: (c[1] / amax) - 0.6 * (((c[2][0] - cy0) / H) ** 2 + ((c[2][1] - cx0) / W) ** 2) ** 0.5)
+    return c[0], (c[2][0], c[2][1])
 
 
 def smooth_crop_params(bboxes, vis, W, H):
@@ -126,13 +148,15 @@ def process(fn):
     proc.add_text_prompt(session, "person")
     full_masks = np.zeros((len(frames), H, W), bool)
     bboxes = np.zeros((len(frames), 4), np.float64); vis = np.zeros(len(frames), bool)
+    prev_cxy = None
     for i in range(len(frames)):
         with torch.inference_mode():
             o = model(inference_session=session, frame_idx=i)
         res = proc.postprocess_outputs(session, o, original_sizes=[[H, W]])
         obj = res[0] if isinstance(res, (list, tuple)) else res
         mk = obj.get("masks") if isinstance(obj, dict) else None
-        m = largest_person_mask(mk.float().cpu().numpy()) if mk is not None and len(mk) > 0 else None
+        cands = person_candidates(mk.float().cpu().numpy()) if mk is not None and len(mk) > 0 else []
+        m, prev_cxy = pick_patient(cands, prev_cxy, H, W)
         if m is not None and m.any():
             full_masks[i] = m
             ys, xs = np.where(m)

@@ -185,9 +185,9 @@ def main(cfg):
                 ema_score = logs.get('ema_val_frame_level_map', -2)
                 score_name = 'val_frame_level_map'
             else:
-                val_score = -logs['val_mse']
-                ema_score = -logs.get('ema_val_mse', float('inf'))
-                score_name = 'val_mse (lower is better)'
+                val_score = logs.get('val_vid_corr', -logs['val_mse'])
+                ema_score = logs.get('ema_val_vid_corr', -2.0)
+                score_name = 'val_vid_corr (higher is better)'
             best_map, saved = pick_and_save_best(
                 model, model_ema, val_score, ema_score, best_map, best_checkpoint_path,
                 model_save_metadata,

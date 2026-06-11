@@ -33,9 +33,23 @@ def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
     raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
 def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
-        # chunk_step = 1 -- pick every frame        XXXX
-        # chunk_step = 2 -- pick every other frame  X_X_X_X
-        # chunk_step = 3 -- pick every third        X__X__X__X
+        """Split a video of ``total_frames`` into overlapping fixed-size chunks.
+
+        Returns a list of chunks, each a list of ``chunk_length`` frame indices.
+
+        - ``chunk_length``: frames per chunk (the model's temporal window).
+        - ``chunk_step``: stride *within* a chunk — pick every Nth frame, so a
+          chunk spans ``(chunk_length - 1) * chunk_step + 1`` real frames:
+              chunk_step = 1 -- pick every frame        XXXX
+              chunk_step = 2 -- pick every other frame  X_X_X_X
+              chunk_step = 3 -- pick every third        X__X__X__X
+        - ``chunk_shift``: stride *between* consecutive chunks (how far the
+          window advances each step). Overlap fraction =
+          ``1 - chunk_shift / chunk_length`` (chunk_length 64, chunk_shift 32 ->
+          50% overlap; chunk_shift 16 -> 75%).
+
+        A trailing partial window that can't fill ``chunk_length`` is dropped.
+        """
         vid_frames = []
         start_ind = 0
 

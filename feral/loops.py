@@ -14,6 +14,27 @@ def _to_prob(output, is_multilabel):
     return torch.sigmoid(output) if is_multilabel else torch.nn.functional.softmax(output, 1)
 
 
+@torch.no_grad()
+def _global_grad_norm(parameters, norm_type=2.0):
+    """Read-only total gradient norm (matches clip_grad_norm_'s return value)
+    WITHOUT mutating any gradient.
+
+    Note: clip_grad_norm_(max_norm=inf) is NOT a safe read-only measurement — on
+    an overflowing batch total_norm is inf, the clip coefficient is inf/inf=NaN,
+    and it multiplies every gradient by NaN in place, turning a recoverable
+    overflow into corrupted weights. This only reads the gradients.
+
+    Returns None if no parameter has a gradient.
+    """
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if not grads:
+        return None
+    return torch.norm(
+        torch.stack([torch.norm(g.detach(), norm_type) for g in grads]),
+        norm_type,
+    )
+
+
 def _per_element_loss(output, target, is_multilabel):
     """Unreduced per-sample loss (for the heavy 'loss distribution' histogram).
 
@@ -106,13 +127,15 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, *,
 
         loss.backward()
 
-        # Grad norm: when clipping, use the clip's returned pre-clip norm;
-        # otherwise (default) still measure it with an inf threshold (no clip).
+        # Grad norm. When clipping, clip_grad_norm_ scales grads in place and
+        # returns the pre-clip norm. Otherwise measure it READ-ONLY — do NOT use
+        # clip_grad_norm_(max_norm=inf), which corrupts gradients to NaN on an
+        # overflowing batch (see _global_grad_norm).
         grad_norm = None
         if grad_clip_norm is not None:
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
         elif log_grad_norm:
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float('inf'))
+            grad_norm = _global_grad_norm(model.parameters())
 
         # Heavy diagnostics computed before optimizer.step() (grads still live).
         heavy = {}

@@ -206,10 +206,10 @@ class TestCalculateF1Metrics:
 
         ans = _make_ans(logits)
         res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="test", multilabel_threshold=0.5)
-        assert res["test_f1"] == pytest.approx(1.0)
-        assert res["test_accuracy"] == pytest.approx(1.0)
-        assert res["test_precision"] == pytest.approx(1.0)
-        assert res["test_recall"] == pytest.approx(1.0)
+        assert res["test/f1"] == pytest.approx(1.0)
+        assert res["test/accuracy"] == pytest.approx(1.0)
+        assert res["test/precision"] == pytest.approx(1.0)
+        assert res["test/recall"] == pytest.approx(1.0)
 
     def test_perfect_multilabel(self):
         n_classes, n_frames = 3, 30
@@ -224,8 +224,8 @@ class TestCalculateF1Metrics:
 
         ans = _make_ans(logits)
         res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=True, prefix="test", multilabel_threshold=0.0)
-        assert res["test_f1"] == pytest.approx(1.0)
-        assert res["test_accuracy"] == pytest.approx(1.0)
+        assert res["test/f1"] == pytest.approx(1.0)
+        assert res["test/accuracy"] == pytest.approx(1.0)
 
     def test_all_wrong_singlelabel(self):
         """Completely wrong predictions should give f1 = 0."""
@@ -241,8 +241,8 @@ class TestCalculateF1Metrics:
 
         ans = _make_ans(logits)
         res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
-        assert res["t_f1"] == pytest.approx(0.0)
-        assert res["t_accuracy"] == pytest.approx(0.0)
+        assert res["t/f1"] == pytest.approx(0.0)
+        assert res["t/accuracy"] == pytest.approx(0.0)
 
     def test_per_class_f1_keys(self):
         """Result dict should contain per-class f1 keys for non-other classes."""
@@ -256,7 +256,7 @@ class TestCalculateF1Metrics:
         ans = _make_ans(logits)
         res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="v", multilabel_threshold=0.5)
         for i in range(n_classes):
-            assert f"v_f1_cls{i}" in res
+            assert f"v/f1_cls{i}" in res
 
     def test_other_excluded_from_f1(self):
         """'other' class should be excluded from macro F1."""
@@ -272,7 +272,7 @@ class TestCalculateF1Metrics:
         ans = _make_ans(logits)
         res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
         # Only class 0 ("walk") counts, and it's perfect
-        assert res["t_f1"] == pytest.approx(1.0)
+        assert res["t/f1"] == pytest.approx(1.0)
 
 
 # ===================================================================

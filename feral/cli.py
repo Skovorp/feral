@@ -9,6 +9,7 @@ _DEFAULT_CONFIG = importlib.resources.files("feral").joinpath("default_config.ya
 
 
 def _load_default_config():
+    """Load and return the packaged default_config.yaml as a dict."""
     with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
         with open(cfg_path, 'r') as f:
             return yaml.safe_load(f)
@@ -17,22 +18,36 @@ def _load_default_config():
 # ── train ────────────────────────────────────────────────────────────────────
 
 def _cmd_train(args):
+    """Run the interactive `feral train` command: build cfg from the default config plus CLI args, optionally apply a --mode preset, interactively configure W&B logging (open/personal/skip), then call train.main(cfg)."""
     from urllib.parse import urlparse
     import wandb
     from feral.train import main as train_main
     from feral.utils import get_random_run_name
+    from feral.presets import apply_mode, MODE_HELP
 
     cfg = _load_default_config()
+    if args.mode is not None:
+        cfg = apply_mode(cfg, args.mode)
+        print(f"Using --mode {args.mode}: {MODE_HELP[args.mode]}")
     cfg['data']['prefix'] = args.video_folder
     cfg['data']['label_json'] = args.label_json_path
     cfg['run_name'] = get_random_run_name()
 
+    if args.resolution is not None:
+        cfg['data']['resize_to'] = args.resolution
+        print(f"Using --resolution {args.resolution} (square input)")
     if args.checkpoint is not None:
         cfg['starting_checkpoint'] = args.checkpoint
     if args.part_subsample is not None:
         cfg['data']['part_sample'] = args.part_subsample
     if args.subsample_keep_rare_threshold is not None:
         cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
+
+    if args.no_wandb:
+        print("Skipping W&B (--no-wandb); metrics will be printed to stdout only.")
+        cfg.pop('wandb', None)
+        train_main(cfg)
+        return
 
     SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
     SHARED_WANDB_ENTITY = "sposiboh"
@@ -74,6 +89,7 @@ def _cmd_train(args):
 # ── train-config ─────────────────────────────────────────────────────────────
 
 def _cmd_train_config(args):
+    """Run `feral train-config`: load cfg from the given YAML file, log in to W&B if a key is present, then call train.main(cfg)."""
     import wandb
     from feral.train import main as train_main
 
@@ -88,6 +104,7 @@ def _cmd_train_config(args):
 # ── infer ────────────────────────────────────────────────────────────────────
 
 def _cmd_infer(args):
+    """Run `feral infer`: dispatch CLI args to run_inference_folder to label every video in a folder from a checkpoint."""
     from feral.inference_folder import run_inference_folder
 
     run_inference_folder(
@@ -97,12 +114,15 @@ def _cmd_infer(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         compile=getattr(args, 'compile', False),
+        mode=args.mode,
+        resolution=args.resolution,
     )
 
 
 # ── reencode ─────────────────────────────────────────────────────────────────
 
 def _cmd_reencode(args):
+    """Run `feral reencode`: validate the input dir holds only videos, set up ffmpeg, then re-encode each video into an empty output dir in parallel. Exits non-zero on validation errors or any failed file."""
     from pathlib import Path
     from multiprocessing import Pool
     from feral.reencode_videos import is_video_file, setup_ffmpeg, process_file
@@ -166,6 +186,7 @@ def _cmd_reencode(args):
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point: build the argparse parser with the train/train-config/infer/reencode subcommands, validate cross-argument constraints, then dispatch to the selected subcommand's handler."""
     parser = argparse.ArgumentParser(prog='feral', description='FERAL: Feature Extraction for Recognition of Animal Locomotion')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
@@ -173,6 +194,16 @@ def main():
     p_train = subparsers.add_parser('train', help='Run interactive training pipeline')
     p_train.add_argument('video_folder', help='Path to the folder containing training videos')
     p_train.add_argument('label_json_path', help='Path to the label JSON file')
+    p_train.add_argument('--mode', choices=['fast', 'max', 'rare'], default=None,
+                         help='Preset recipe overlay: '
+                              'fast (smallest V-JEPA 2.1 + Parkinson recipe, cheapest); '
+                              'max (largest runnable V-JEPA 2.1 + 75%% chunk overlap, best accuracy); '
+                              'rare (rare-class robustness: EMA & mixup off + grad-clip + class-weight cap)')
+    p_train.add_argument('--resolution', type=int, default=None,
+                         help='Square input resolution for training (e.g. 512). Overrides the '
+                              'backbone-native default; V-JEPA interpolates positional embeddings.')
+    p_train.add_argument('--no-wandb', action='store_true',
+                         help='Disable Weights & Biases logging non-interactively; metrics print to stdout only.')
     p_train.add_argument('--checkpoint', '-c', default=None,
                          help='Path to a checkpoint to resume from')
     p_train.add_argument('--part_subsample', type=float, default=None,
@@ -195,6 +226,12 @@ def main():
     p_infer.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size (default: 8)')
     p_infer.add_argument('--num_workers', '-w', type=int, default=4, help='DataLoader workers (default: 4)')
     p_infer.add_argument('--compile', action='store_true', help='Compile model with torch.compile')
+    p_infer.add_argument('--mode', choices=['fast', 'max'], default=None,
+                         help='Inference overlap preset (model size is fixed by the checkpoint): '
+                              'fast (50%% chunk overlap, faster); max (75%% overlap, smoother labels, slower).')
+    p_infer.add_argument('--resolution', type=int, default=None,
+                         help='Override the square input resolution at inference (default: as trained, '
+                              'read from the checkpoint).')
     p_infer.set_defaults(func=_cmd_infer)
 
     # feral reencode

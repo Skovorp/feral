@@ -6,6 +6,8 @@ from feral.backbones import BackboneAdapter
 
 class AttentionPoolingBlockCustom(nn.Module):
     def __init__(self, embed_dim, num_heads, out_tokens, **kwargs):
+        """Build the attention pooling block. If out_tokens > 0, allocate that many learnable
+        query tokens; if out_tokens == 0, mean-pooling is used as the query at forward time."""
         super().__init__()
         self.out_tokens = out_tokens
         if out_tokens > 0:
@@ -16,6 +18,9 @@ class AttentionPoolingBlockCustom(nn.Module):
         self.attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
 
     def forward(self, x):
+        """Cross-attend learnable (or mean-pooled) queries over the token sequence x and flatten
+        the result. x is (B, N, embed_dim); returns (B * num_queries, embed_dim), where num_queries
+        is out_tokens (or 1 when out_tokens == 0)."""
         if self.out_tokens == 0:
             x_q = x.mean(1, keepdim=True)
         else:
@@ -36,6 +41,9 @@ class FeralModel(nn.Module):
             freeze_encoder_layers=0,
             pretrained=True,
             **kwargs):
+        """Assemble the model: a backbone encoder, an attention-pooling projector (out_tokens =
+        predict_per_item), batch-norm, dropout, and a linear classification head. Freezes the first
+        freeze_encoder_layers backbone layers."""
         super().__init__()
         self.backbone = BackboneAdapter(backbone, pretrained=pretrained)
         d = self.backbone.hidden_dim
@@ -49,6 +57,8 @@ class FeralModel(nn.Module):
         self.backbone.freeze_encoder(freeze_encoder_layers)
 
     def forward(self, x):
+        """Run input through backbone, attention pooling, norm/dropout, and head; returns class
+        logits of shape (B * predict_per_item, num_classes)."""
         x = self.backbone(x)
         x = self.clip_projector(x)
         x = self.fc_norm(x)

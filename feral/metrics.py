@@ -1,6 +1,6 @@
 import numpy as np
 import json 
-from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score
+from sklearn.metrics import average_precision_score, precision_score, recall_score, f1_score, accuracy_score, precision_recall_curve
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as mpatches
@@ -17,6 +17,7 @@ from feral.dataset import get_frame_count
 logger = logging.getLogger(__name__)
 
 def calc_frame_level_map(ans, labels_json, partition):
+    """Ensemble per-frame predictions and return mean average precision over non-'other' classes."""
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
     logits = generate_empty_logits(labels_json, partition)
@@ -45,6 +46,11 @@ def calc_frame_level_map(ans, labels_json, partition):
     return sum(aps) / len(aps)
 
 def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
+    """Compute precision/recall/F1/accuracy (plus per-class F1) for non-'other' classes.
+
+    Single-label uses argmax with macro-averaging; multilabel thresholds logits at
+    multilabel_threshold per class and averages. Returns a dict keyed by '{prefix}/...'.
+    """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
 
@@ -67,12 +73,12 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         per_class_f1 = f1_score(target_labels, pred_labels, labels=valid_classes, average=None)
         res = {}
         for cls_ind, f1_val in zip(valid_classes, per_class_f1):
-            res[f'{prefix}_f1_{class_names[cls_ind]}'] = f1_val
+            res[f'{prefix}/f1_{class_names[cls_ind]}'] = f1_val
 
-        res[f'{prefix}_precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
-        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        res[f'{prefix}/precision'] = precision_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/recall'] = recall_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/f1'] = f1_score(target_labels, pred_labels, labels=valid_classes, average='macro')
+        res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
     else:
         pred_labels = (preds > multilabel_threshold) * 1
@@ -90,16 +96,87 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
             precisions.append(p)
             recalls.append(r)
             f1s.append(f)
-            res[f'{prefix}_f1_{class_names[valid_class_ind]}'] = f
+            res[f'{prefix}/f1_{class_names[valid_class_ind]}'] = f
 
-        res[f'{prefix}_precision'] = sum(precisions) / len(precisions)
-        res[f'{prefix}_recall'] = sum(recalls) / len(recalls)
-        res[f'{prefix}_f1'] = sum(f1s) / len(f1s)
+        res[f'{prefix}/precision'] = sum(precisions) / len(precisions)
+        res[f'{prefix}/recall'] = sum(recalls) / len(recalls)
+        res[f'{prefix}/f1'] = sum(f1s) / len(f1s)
         # exact match: all class predictions must match all class targets
-        res[f'{prefix}_accuracy'] = accuracy_score(target_labels, pred_labels)
+        res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
 
+def _per_class_optimal_picks(ans, labels_json, partition):
+    """
+    Multilabel one-vs-rest sweep with precision_recall_curve. Returns
+    dict[class_ind] = (best_f1, best_threshold) for non-'other' classes with at
+    least one positive. Classes outside the dict are excluded (no positives).
+    """
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    valid_classes = [i for i, n in class_names.items() if n != 'other']
+
+    logits = generate_empty_logits(labels_json, partition)
+    logits = ensemble_predictions(ans, logits)
+
+    preds = np.concatenate([logits[fn] for fn in labels_json['splits'][partition]], 0)
+    targets = np.concatenate([labels_json['labels'][fn] for fn in labels_json['splits'][partition]], 0)
+
+    out = {}
+    for c in valid_classes:
+        y_true = targets[:, c].astype(int)
+        if y_true.sum() == 0:
+            continue
+        y_score = preds[:, c]
+        p, r, thr = precision_recall_curve(y_true, y_score)
+        f1 = 2 * p * r / np.clip(p + r, 1e-12, None)
+        best = int(np.argmax(f1))
+        if not len(thr):
+            continue
+        out[c] = (float(f1[best]), float(thr[min(best, len(thr) - 1)]))
+    return out
+
+
+def compute_optimal_per_class_thresholds(ans, labels_json, partition):
+    """Per-class optimal-F1 thresholds keyed by class_ind. Empty if no valid classes."""
+    return {c: t for c, (_f, t) in _per_class_optimal_picks(ans, labels_json, partition).items()}
+
+
+def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+    """Per-class optimal-threshold best-F1 metrics (multilabel only).
+
+    Returns a dict with '{prefix}/best_f1_{name}' and '{prefix}/best_thr_{name}' per
+    class (nan for classes with no positives) and '{prefix}/best_f1' as their mean.
+    Returns {} for single-label.
+    """
+    # Only defined for multilabel — per-class thresholds aren't simultaneously
+    # applicable under single-label argmax, so the metric would be misleading.
+    if not is_multilabel:
+        return {}
+
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+    valid_classes = [i for i, n in class_names.items() if n != 'other']
+    picks = _per_class_optimal_picks(ans, labels_json, partition)
+
+    res = {}
+    f1s = []
+    for c in valid_classes:
+        name = class_names[c]
+        if c in picks:
+            f1, thr = picks[c]
+            res[f'{prefix}/best_f1_{name}'] = f1
+            res[f'{prefix}/best_thr_{name}'] = thr
+            f1s.append(f1)
+        else:
+            res[f'{prefix}/best_f1_{name}'] = float('nan')
+            res[f'{prefix}/best_thr_{name}'] = float('nan')
+    res[f'{prefix}/best_f1'] = (sum(f1s) / len(f1s)) if f1s else float('nan')
+    return res
+
+
 def ensemble_predictions(ans, logits):
+    """Accumulate per-chunk predictions into per-frame logits (uniform weights), averaging
+    overlapping predictions and filling gaps by inverse-distance interpolation from the
+    nearest predicted frames on either side. Mutates and returns `logits`.
+    """
     predict_per_item = max(x[0][2] for x in ans) + 1
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
@@ -135,12 +212,17 @@ def ensemble_predictions(ans, logits):
     return logits
 
 def generate_empty_logits(labels_json, partition):
+    """Return dict[filename -> zeros array of shape (num_frames, num_classes)] for the partition."""
     logits = {}
     for k in labels_json['splits'][partition]:
         logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
     return logits
 
 def generate_raster_plot(ans, labels_json, partition):
+    """Build a single-label ethogram raster (prediction, label, mismatch rows) across all
+    videos in the partition, with per-video separators and a class legend. Returns a PIL
+    image; on failure logs the traceback and returns an 'Error' image instead.
+    """
     try:
         logits = generate_empty_logits(labels_json, partition)
         logits = ensemble_predictions(ans, logits)
@@ -239,6 +321,104 @@ def generate_raster_plot(ans, labels_json, partition):
         return res
 
 
+def generate_multilabel_raster_plot(ans, labels_json, partition, thresholds):
+    """
+    Multilabel ethogram: two stacked rasters (prediction on top, ground truth on
+    bottom), one row per class, cell colored when class is active. Black vlines
+    separate videos with their names written below. Always returns a PIL image —
+    on failure, an 'Error' image (logs traceback) so training never dies here.
+
+    thresholds: float OR dict[class_ind -> float]. Missing classes default to 0.5.
+    """
+    try:
+        class_names = {int(k): v for k, v in labels_json['class_names'].items()}
+        n_classes = len(class_names)
+
+        if isinstance(thresholds, dict):
+            thr_arr = np.array(
+                [thresholds.get(i, 0.5) for i in range(n_classes)], dtype=float
+            )
+        else:
+            thr_arr = np.full(n_classes, float(thresholds))
+
+        logits = generate_empty_logits(labels_json, partition)
+        logits = ensemble_predictions(ans, logits)
+
+        video_names = list(logits.keys())
+        preds_list, targets_list = [], []
+        split_positions = []
+        cursor = 0
+        for name in video_names:
+            pred = (logits[name] > thr_arr[None, :]).astype(int)
+            label = np.array(labels_json['labels'][name]).astype(int)
+            assert label.ndim == 2 and label.shape[1] == n_classes, (
+                f"Multilabel raster expects labels of shape (T, {n_classes}); got {label.shape} for {name}"
+            )
+            preds_list.append(pred)
+            targets_list.append(label)
+            cursor += pred.shape[0]
+            split_positions.append(cursor)
+        split_positions = split_positions[:-1]
+
+        arr_pred = np.concatenate(preds_list, 0).T   # (C, T)
+        arr_label = np.concatenate(targets_list, 0).T  # (C, T)
+
+        base_cmap = cm.get_cmap('nipy_spectral')
+        color_range = np.linspace(0.1, 1.0, n_classes)
+        colors = [base_cmap(v) for v in color_range]
+        if 'other' in class_names.values():
+            idx = list(class_names.values()).index('other')
+            colors[idx], colors[-1] = colors[-1], colors[idx]
+
+        H, W = arr_pred.shape
+        rgb_pred = np.ones((H, W, 3), dtype=float)
+        rgb_label = np.ones((H, W, 3), dtype=float)
+        for c in range(n_classes):
+            color = np.array(colors[c][:3])
+            rgb_pred[c, arr_pred[c] == 1] = color
+            rgb_label[c, arr_label[c] == 1] = color
+
+        per_class_h = 0.6
+        fig_h = max(8.0, 2 * (n_classes * per_class_h + 1.0) + 4.0)
+        fig, axes = plt.subplots(2, 1, figsize=(32, fig_h), sharex=True)
+
+        for ax, rgb, title in zip(axes, [rgb_pred, rgb_label], ['prediction', 'ground truth']):
+            ax.imshow(rgb, aspect='auto', interpolation='nearest')
+            ax.set_yticks(range(n_classes))
+            ax.set_yticklabels([class_names[i] for i in range(n_classes)], fontsize=12)
+            ax.set_title(title, fontsize=16, pad=12)
+            ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            for pos in split_positions:
+                ax.axvline(pos, color='black', linewidth=2)
+
+        # video names well below the bottom raster
+        bottom_ax = axes[-1]
+        cursor = 0
+        for name in video_names:
+            length = logits[name].shape[0]
+            center = cursor + length // 2
+            wrapped = '\n'.join([name[i:i+15] for i in range(0, len(name), 15)])
+            bottom_ax.text(
+                center, n_classes + 0.5, wrapped,
+                ha='center', va='top', fontsize=11, clip_on=False,
+            )
+            cursor += length
+
+        plt.subplots_adjust(left=0.12, right=0.99, bottom=0.28, top=0.92, hspace=0.6)
+
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
+    except Exception:
+        traceback.print_exc()
+        fig, ax = plt.subplots(figsize=(32, 4))
+        ax.text(0.5, 0.5, 'Error. See logs', fontsize=40, ha='center', va='center', color='red')
+        ax.axis('off')
+        res = fig2img(fig)
+        plt.close(fig)
+        return res
+
+
 def fig2img(fig):
     """Convert a Matplotlib figure to a PIL Image and return it"""
     import io
@@ -249,6 +429,9 @@ def fig2img(fig):
     return img
 
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
+    """Compute per-class average precision and mAP (over non-'other' classes) from a list of
+    (..., preds, targets) items. Returns a dict keyed by '{prefix}/ap_{name}' and '{prefix}/map'.
+    """
     preds = np.array([x[-2] for x in ans])
     targets = np.array([x[-1] for x in ans]).astype(int)
 
@@ -258,12 +441,16 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
         ap = average_precision_score(targets[:, cls_ind], preds[:, cls_ind])
         if cls_name != 'other':
             aps.append(ap)
-        res[f'{prefix}_ap_{cls_name}'] = ap 
-    res[f'{prefix}_map'] = sum(aps) / len(aps)
+        res[f'{prefix}/ap_{cls_name}'] = ap
+    res[f'{prefix}/map'] = sum(aps) / len(aps)
     return res
 
 
 def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
+    """Write an mp4 to output_path containing only frames near prediction/label mismatches
+    (within look_around frames), overlaying filename, frame index, true/pred class, and
+    per-class logits on each frame. Reads videos from `prefix`; skips unreadable files.
+    """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, logits)
@@ -344,6 +531,10 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
 
 
 def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn):
+    """Ensemble inference predictions (and EMA predictions if present) into per-frame logits
+    and write them as JSON to save_fn under keys 'preds' and optionally 'ema_preds', each a
+    dict[filename -> list-of-lists]. Frame counts are read from the videos under video_prefix.
+    """
     out = {}
     
     ans_logits = {} 

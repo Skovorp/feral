@@ -1,0 +1,35 @@
+run_name: vplarge_lr1e4_c16
+backbone: videoprism_v1_large
+predict_per_item: 16
+model:
+  fc_drop_rate: 0.5
+  class_weights: inv_freq_sqrt
+  freeze_encoder_layers: 12
+data:
+  prefix: "/workspace/calms/videos"
+  label_json: "/workspace/calms/calms_labels.json"
+  chunk_length: 16
+  chunk_shift: 8
+  chunk_step: 1
+  resize_to: 288
+  resize_style: square
+  do_aa: true
+training:
+  epochs: 10
+  train_bs: 4
+  val_bs: 8
+  num_workers: 12
+  part_warmup: 0.2
+  lr: 1.0e-4
+  weight_decay: 0.1
+  label_smoothing: 0.1
+  compile: true
+mixup_alpha: 0.8
+ema_decay: 0.999
+seed: 0
+device: "cuda"
+wandb:
+  key: dde17687b4b84ba8171dfede64d865243be41a0e
+  entity: sposiboh
+  project: feral_public
+multilabel_threshold: 0.85

@@ -15,6 +15,10 @@ from feral.utils import get_class_frequencies
 logger = logging.getLogger(__name__)
 
 def read_range_video_decord(path, frames, width=-1, height=-1):
+    """Decode the given ``frames`` indices from a video, resizing at decode time.
+
+    Returns a uint8 tensor of shape (T, C, H, W).
+    """
     vr = VideoReader(path, width=width, height=height)
     video = vr.get_batch(frames).asnumpy()  # (T, H, W, C)
     return torch.from_numpy(video).permute(0, 3, 1, 2)
@@ -33,9 +37,23 @@ def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
     raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
 def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
-        # chunk_step = 1 -- pick every frame        XXXX
-        # chunk_step = 2 -- pick every other frame  X_X_X_X
-        # chunk_step = 3 -- pick every third        X__X__X__X
+        """Split a video of ``total_frames`` into overlapping fixed-size chunks.
+
+        Returns a list of chunks, each a list of ``chunk_length`` frame indices.
+
+        - ``chunk_length``: frames per chunk (the model's temporal window).
+        - ``chunk_step``: stride *within* a chunk — pick every Nth frame, so a
+          chunk spans ``(chunk_length - 1) * chunk_step + 1`` real frames:
+              chunk_step = 1 -- pick every frame        XXXX
+              chunk_step = 2 -- pick every other frame  X_X_X_X
+              chunk_step = 3 -- pick every third        X__X__X__X
+        - ``chunk_shift``: stride *between* consecutive chunks (how far the
+          window advances each step). Overlap fraction =
+          ``1 - chunk_shift / chunk_length`` (chunk_length 64, chunk_shift 32 ->
+          50% overlap; chunk_shift 16 -> 75%).
+
+        A trailing partial window that can't fill ``chunk_length`` is dropped.
+        """
         vid_frames = []
         start_ind = 0
 
@@ -62,6 +80,7 @@ def build_resize_transform(resize_to, resize_style):
 
 
 def get_frame_count(path: str):
+    """Return the video's frame count via OpenCV, or None if it can't be read."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Video not found: {path}")
     cap = cv2.VideoCapture(path)
@@ -73,6 +92,7 @@ def get_frame_count(path: str):
 
 
 def get_video_dims(path: str):
+    """Return the video's ``(width, height)`` in pixels via OpenCV."""
     cap = cv2.VideoCapture(path)
     try:
         return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -84,6 +104,14 @@ class ClsDataset():
                  num_classes, prefix, resize_to, chunk_shift, chunk_length,
                  chunk_step, resize_style="square", part_sample=1.0,
                  subsample_keep_rare_threshold=None, **kwargs):
+        """Build the chunk samples/labels for a partition and set up transforms.
+
+        Parses the label JSON into ``(filename, frame_ids)`` chunks, configures
+        augmentation/normalization, and optionally subsamples the train set to
+        ``part_sample`` of its chunks. When ``subsample_keep_rare_threshold`` is
+        set, all chunks containing a rare class (class frequency below the
+        threshold) are kept and the remainder is filled from common chunks.
+        """
         self.prefix = prefix
         self.partition = partition
         self.predict_per_item = predict_per_item
@@ -147,6 +175,14 @@ class ClsDataset():
 
 
     def parse_json(self, chunk_shift, chunk_length, chunk_step):
+        """Populate ``self.samples`` and ``self.labels`` from the label JSON.
+
+        For each video in the partition, splits it into chunks of frame indices
+        and stores ``(filename, frames)`` samples (plus per-frame labels for
+        non-inference partitions). Also computes the shared decode size from the
+        first video and sets ``self.is_multilabel``. Asserts the label frame
+        count matches the video frame count for non-inference partitions.
+        """
         self.samples = []
         self.labels = []
         self.decode_size = None
@@ -171,6 +207,7 @@ class ClsDataset():
             self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
 
     def proc_target(self, target):
+        """Convert a chunk's labels to a float tensor, one-hot encoding single-label targets."""
         target = torch.tensor(target).long()
         if len(target.shape) == 1:
             target = one_hot(target, self.num_classes)
@@ -178,6 +215,11 @@ class ClsDataset():
         return target
 
     def get_video(self, i):
+        """Decode the i-th chunk's frames and return ``(video, names)``.
+
+        ``video`` is the decoded (T, C, H, W) tensor; ``names`` is a list of
+        ``(filename, frame_index_in_video, frame_index_in_chunk)`` tuples.
+        """
         fn, frames = self.samples[i]
         pth = os.path.join(self.prefix, fn)
         w, h = self.decode_size
@@ -185,6 +227,11 @@ class ClsDataset():
         return read_range_video_decord(pth, frames, width=w, height=h), [(fn, frames[i], i) for i in range(len(frames))]
 
     def get_item_simple(self, index):
+        """Load, augment, scale and normalize a chunk for the given index.
+
+        Returns ``(video, label)`` for train, ``(video, label, names)`` for
+        val/test, and ``(video, names)`` for inference.
+        """
         video, names = self.get_video(index)
         video = video if self.aug is None else self.aug(video)
         outputs = self.norm(video * self.scale)
@@ -199,6 +246,7 @@ class ClsDataset():
             return outputs, names
 
     def __getitem__(self, index):
+        """Return the chunk at ``index``, retrying up to 3 random indices on failure."""
         try:
             return self.get_item_simple(index)
         except Exception:
@@ -213,16 +261,19 @@ class ClsDataset():
 
     
     def __len__(self):
+        """Number of chunks in the dataset."""
         return len(self.samples)
 
 
 def collate_fn_val(batch):
+    """Collate ``(tensor, target, names)`` items, stacking tensors and targets."""
     tensors, targets, names = zip(*batch)
     tensors = torch.stack(tensors)
     targets = torch.stack(targets)
     return tensors, targets, names
 
 def collate_fn_inference(batch):
+    """Collate ``(tensor, names)`` items, stacking tensors into a batch."""
     tensors, names = zip(*batch)
     tensors = torch.stack(tensors)
     return tensors, names

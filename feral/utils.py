@@ -8,6 +8,12 @@ import os
 
 @torch.no_grad()
 def prep_for_answers(outputs, targets, names=None):
+    """Move outputs/targets to CPU lists and zip them into per-item tuples.
+
+    Flattens a nested `names` list if needed. Returns a list of tuples shaped
+    (name, output, target), (name, output), or (output, target) depending on
+    which of `names`/`targets` are provided.
+    """
     outputs = outputs.cpu().detach().tolist()
     if targets is not None:
         targets = targets.cpu().detach().tolist()
@@ -46,32 +52,49 @@ def get_class_frequencies(labels_arr, num_classes=None):
         freqs = labels_arr.mean(axis=0)
     return freqs
 
-def get_weights(json_data, weight_type, device):
+def get_weights(json_data, weight_type, device, max_weight=None):
+    """Compute per-class loss weights from train-split label frequencies.
+
+    `weight_type` selects inverse-frequency ('inv_freq') or its square root
+    ('inv_freq_sqrt'); None returns None. Single-label uses 1/freq, multi-label
+    uses (1-freq)/freq. Zero-frequency classes are clamped, and `max_weight`
+    optionally caps the result. Returns a tensor on `device` (or None).
+    """
     assert weight_type is None or weight_type in ('inv_freq', 'inv_freq_sqrt'), "weight_type should be 'inv_freq', 'inv_freq_sqrt' or None"
     if weight_type is None:
-        return None 
+        return None
     arr = np.concatenate([json_data['labels'][x] for x in json_data['splits']['train']])
     # Pass num_classes so bincount covers declared classes even when the train
     # split has zero examples of a high-index class (otherwise the returned
     # weight tensor is too short and CrossEntropyLoss crashes).
     num_classes = len(json_data['class_names'])
     freqs = torch.tensor(get_class_frequencies(arr, num_classes=num_classes))
-    
+
     if len(arr.shape) == 1:
         ratio = (1.0 / freqs).to(device)
     elif len(arr.shape) == 2:
-        ratio = ((1 - freqs) / freqs).to(device)    
-    if freqs.min().item() <= 0: 
+        ratio = ((1 - freqs) / freqs).to(device)
+    if freqs.min().item() <= 0:
         logger.warning("Some classes don't have any examples. Class frequencies: %s", freqs)
         ratio = torch.clamp(ratio, max=1000000.0)
-        
+
     if weight_type == 'inv_freq':
-        return ratio
+        weights = ratio
     elif weight_type == 'inv_freq_sqrt':
-        return torch.sqrt(ratio)
-    
+        weights = torch.sqrt(ratio)
+
+    # Optional cap: extreme inverse-frequency weights for ultra-rare classes can
+    # blow up the loss (esp. BCE pos_weight); capping stabilizes those runs.
+    if max_weight is not None:
+        pre_max = weights.max().item()
+        if pre_max > max_weight:
+            logger.info("Capping class weights at %.1f (was max=%.2f)", max_weight, pre_max)
+        weights = torch.clamp(weights, max=float(max_weight))
+    return weights
+
 
 def get_random_run_name():
+    """Generate a random 'size_adjective_animal' run name."""
     sizes = [
         "big", "huge", "giant", "massive", "jumbo", "colossal",
         "mega"
@@ -101,6 +124,8 @@ def get_random_run_name():
     ])
 
 def last_nonzero_index(arr):
+    """For each position, return the index of the most recent nonzero element
+    at or before it (-1 if none seen yet). Returns an int array like `arr`."""
     out = np.empty_like(arr, dtype=int)
     last_idx = -1
     for i in range(len(arr)):
@@ -110,6 +135,8 @@ def last_nonzero_index(arr):
     return out
 
 def next_nonzero_index(arr):
+    """For each position, return the index of the nearest nonzero element
+    at or after it (-1 if none follow). Returns an int array like `arr`."""
     out = np.empty_like(arr, dtype=int)
     next_idx = -1
     for i in reversed(range(len(arr))):
@@ -169,6 +196,8 @@ def check_environment(compile_enabled):
 
 
 def suggested_num_workers():
+    """Suggest a DataLoader worker count from available CPUs (affinity if
+    available, else os.cpu_count()). May return None if neither is available."""
     max_num_worker_suggest = None
     if hasattr(os, 'sched_getaffinity'):
         try:
@@ -184,6 +213,8 @@ def suggested_num_workers():
     return max_num_worker_suggest
 
 def save_model(model, path, metadata):
+    """Save the model's state_dict plus `metadata` to `path` via torch.save,
+    unwrapping a torch.compile `_orig_mod` wrapper if present."""
     m = model
     if hasattr(m, '_orig_mod'):
         m = m._orig_mod

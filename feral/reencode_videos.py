@@ -36,6 +36,7 @@ FFMPEG_URLS = {
 }
 
 def get_platform():
+    """Return the normalized platform name: 'Darwin', 'Windows', or 'Linux' (the fallback for any other OS)."""
     import platform
     sysname = platform.system()
     if sysname in ('Darwin', 'Windows'):
@@ -48,6 +49,7 @@ def download_file(url, filename):
     print(f"Downloading {filename}...")
     
     def progress_hook(block_num, block_size, total_size):
+        """urlretrieve reporthook that prints download progress as a percentage."""
         downloaded = block_num * block_size
         if total_size > 0:
             percent = min(100, (downloaded * 100) // total_size)

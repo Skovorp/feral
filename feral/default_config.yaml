@@ -5,6 +5,7 @@ model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
   freeze_encoder_layers: 12
+  max_class_weight: null   # cap inverse-frequency class/pos weights (null = no cap; e.g. 20 for rare classes)
 data:
   chunk_length: 64
   chunk_shift: 32
@@ -25,6 +26,9 @@ training:
   label_smoothing: 0.1
   compile: true
   patience: null
+  grad_clip_norm: null     # global grad-norm clip (null = off; e.g. 1.0 to stabilize rare-class runs)
+  log_grad_norm: true      # log global grad-norm every step even when not clipping (cheap)
+  heavy_log_every: null    # if set (e.g. 200), every N steps log per-layer grad/weight-norm + per-element loss histograms
 mixup_alpha: 0.8
 ema_decay: 0.999
 seed: 0

@@ -102,7 +102,10 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
 
 def build_training_objects(cfg, model, train_dataset, train_loader, labels_json, device):
     """Build criterion, optimizer, lr_scheduler, mixup. Returns dict-of-objects."""
-    class_weights = get_weights(train_dataset.json_data, cfg['model']['class_weights'], device)
+    class_weights = get_weights(
+        train_dataset.json_data, cfg['model']['class_weights'], device,
+        max_weight=cfg['model'].get('max_class_weight'),
+    )
     if labels_json['is_multilabel']:
         criterion = torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)
     else:

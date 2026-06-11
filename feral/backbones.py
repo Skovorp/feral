@@ -147,6 +147,18 @@ class BackboneAdapter(nn.Module):
             )
             self.model = encoder
         elif self.source == "videoprism_hf":
+            # VideoPrism's modeling code uses torch.nn.attention.flex_attention,
+            # which only exists in torch >= 2.5 (feral's floor is 2.4, which is
+            # fine for the V-JEPA backbones). Fail with a clear message instead
+            # of a cryptic ModuleNotFoundError deep inside trust_remote_code.
+            try:
+                import torch.nn.attention.flex_attention  # noqa: F401
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    f"VideoPrism backbones require torch >= 2.5 (for "
+                    f"torch.nn.attention.flex_attention); found torch {torch.__version__}. "
+                    f"Upgrade torch, or use a V-JEPA 2 / 2.1 backbone."
+                ) from e
             from transformers import AutoConfig, AutoModel
             if pretrained:
                 self.model = AutoModel.from_pretrained(entry["slug"], trust_remote_code=True)

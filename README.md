@@ -30,8 +30,10 @@ That's it. Now you should be able to run everything.
 
 - Preferably Linux. Windows should work too. We haven't tested on Mac.
 - Python 3.10+
-- PyTorch 2.4+ (with a compatible CUDA version)
+- PyTorch 2.5+ (with a compatible CUDA version)
 - NVIDIA GPU with Ampere architecture or newer (compute capability 8.0+) and 24+ GB VRAM. FERAL uses bfloat16 and flash attention, which require newer architectures.
+
+> If PyTorch 2.5 is awkward to get in your environment, **2.4 works for everything except the VideoPrism backbones** (which need `torch.nn.attention.flex_attention`, added in 2.5). The V-JEPA backbones run fine on 2.4.
 
 > Older GPUs like V100 (Volta) and T4 (Turing) — including free Google Colab T4 instances — will **not** work. Supported GPUs include: A100, H100, A10, L4, L40, RTX 3000/4000/5000 series, and newer.
 
@@ -41,6 +43,15 @@ That's it. Now you should be able to run everything.
 - **PyTorch 2.8-2.9 has a known bug on Windows** where `torch.compile` crashes with `OverflowError: Python int too large to convert to C long` ([pytorch#162430](https://github.com/pytorch/pytorch/issues/162430)). Use PyTorch 2.7 or 2.10+ to avoid this. See [issue #11](https://github.com/Skovorp/feral/issues/11) for details.
 
 We've used RunPod extensively to run experiments. It's very easy to set up.
+
+### Troubleshooting
+
+- **V-JEPA 2.1 backbone download fails with `URLError: [Errno 111] Connection refused`.** Upstream's `facebookresearch/vjepa2` `torch.hub` repo currently ships a leftover test URL (`VJEPA_BASE_URL = "http://localhost:8300"`). Point it back at the public CDN in the cached copy:
+  ```
+  sed -i 's|http://localhost:8300|https://dl.fbaipublicfiles.com/vjepa2|' \
+    ~/.cache/torch/hub/facebookresearch_vjepa2_main/src/hub/backbones.py
+  ```
+  This only affects the `vjepa2_1_*` (V-JEPA 2.1) backbones.
 
 ## Running FERAL
 

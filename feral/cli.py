@@ -21,18 +21,31 @@ def _cmd_train(args):
     import wandb
     from feral.train import main as train_main
     from feral.utils import get_random_run_name
+    from feral.presets import apply_mode, MODE_HELP
 
     cfg = _load_default_config()
+    if args.mode is not None:
+        cfg = apply_mode(cfg, args.mode)
+        print(f"Using --mode {args.mode}: {MODE_HELP[args.mode]}")
     cfg['data']['prefix'] = args.video_folder
     cfg['data']['label_json'] = args.label_json_path
     cfg['run_name'] = get_random_run_name()
 
+    if args.resolution is not None:
+        cfg['data']['resize_to'] = args.resolution
+        print(f"Using --resolution {args.resolution} (square input)")
     if args.checkpoint is not None:
         cfg['starting_checkpoint'] = args.checkpoint
     if args.part_subsample is not None:
         cfg['data']['part_sample'] = args.part_subsample
     if args.subsample_keep_rare_threshold is not None:
         cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
+
+    if args.no_wandb:
+        print("Skipping W&B (--no-wandb); metrics will be printed to stdout only.")
+        cfg.pop('wandb', None)
+        train_main(cfg)
+        return
 
     SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
     SHARED_WANDB_ENTITY = "sposiboh"
@@ -97,6 +110,8 @@ def _cmd_infer(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         compile=getattr(args, 'compile', False),
+        mode=args.mode,
+        resolution=args.resolution,
     )
 
 
@@ -173,6 +188,16 @@ def main():
     p_train = subparsers.add_parser('train', help='Run interactive training pipeline')
     p_train.add_argument('video_folder', help='Path to the folder containing training videos')
     p_train.add_argument('label_json_path', help='Path to the label JSON file')
+    p_train.add_argument('--mode', choices=['fast', 'max', 'rare'], default=None,
+                         help='Preset recipe overlay: '
+                              'fast (smallest V-JEPA 2.1 + Parkinson recipe, cheapest); '
+                              'max (largest runnable V-JEPA 2.1 + 75%% chunk overlap, best accuracy); '
+                              'rare (rare-class robustness: EMA & mixup off + grad-clip + class-weight cap)')
+    p_train.add_argument('--resolution', type=int, default=None,
+                         help='Square input resolution for training (e.g. 512). Overrides the '
+                              'backbone-native default; V-JEPA interpolates positional embeddings.')
+    p_train.add_argument('--no-wandb', action='store_true',
+                         help='Disable Weights & Biases logging non-interactively; metrics print to stdout only.')
     p_train.add_argument('--checkpoint', '-c', default=None,
                          help='Path to a checkpoint to resume from')
     p_train.add_argument('--part_subsample', type=float, default=None,
@@ -195,6 +220,12 @@ def main():
     p_infer.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size (default: 8)')
     p_infer.add_argument('--num_workers', '-w', type=int, default=4, help='DataLoader workers (default: 4)')
     p_infer.add_argument('--compile', action='store_true', help='Compile model with torch.compile')
+    p_infer.add_argument('--mode', choices=['fast', 'max'], default=None,
+                         help='Inference overlap preset (model size is fixed by the checkpoint): '
+                              'fast (50%% chunk overlap, faster); max (75%% overlap, smoother labels, slower).')
+    p_infer.add_argument('--resolution', type=int, default=None,
+                         help='Override the square input resolution at inference (default: as trained, '
+                              'read from the checkpoint).')
     p_infer.set_defaults(func=_cmd_infer)
 
     # feral reencode

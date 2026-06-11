@@ -57,7 +57,8 @@ def _load_default_cfg():
 
 
 def run_inference_folder(checkpoint_path, video_folder, output=None,
-                         batch_size=8, num_workers=4, compile=False):
+                         batch_size=8, num_workers=4, compile=False,
+                         mode=None, resolution=None):
     # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
     # Falling back to default_config only covers legacy checkpoints where the
     # cfg wasn't persisted — the data/model params in default_config may not
@@ -76,6 +77,22 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
         cfg = _load_default_cfg()
 
     cfg['training']['compile'] = compile
+
+    # Inference-time overrides. Backbone/model size is fixed by the checkpoint
+    # weights and is never changed here; only chunk overlap (stride) and input
+    # resolution can be safely overridden at predict time.
+    if mode is not None:
+        from feral.presets import infer_chunk_shift
+        new_shift = infer_chunk_shift(mode, cfg['data']['chunk_length'])
+        if new_shift is not None:
+            logger.info("--mode %s: chunk_shift %s -> %s (%.0f%% overlap)",
+                        mode, cfg['data']['chunk_shift'], new_shift,
+                        100 * (1 - new_shift / cfg['data']['chunk_length']))
+            cfg['data']['chunk_shift'] = new_shift
+    if resolution is not None:
+        logger.info("--resolution %s: resize_to %s -> %s",
+                    resolution, cfg['data']['resize_to'], resolution)
+        cfg['data']['resize_to'] = resolution
     device = 'cuda'
     video_filenames = find_videos(video_folder)
 

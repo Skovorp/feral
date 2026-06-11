@@ -79,6 +79,15 @@ class TestApplyMode:
     def test_every_mode_has_help_text(self):
         assert set(MODE_HELP) == set(PRESETS)
 
+    @pytest.mark.parametrize("mode", sorted(PRESETS))
+    def test_predict_per_item_matches_chunk_length(self, mode):
+        # The head emits predict_per_item tokens/item; targets are built per
+        # chunk frame. A preset that changes chunk_length must keep them equal,
+        # or loss shapes mismatch (regression: max once changed chunk_length
+        # without pinning predict_per_item).
+        out = apply_mode(_base_cfg(), mode)
+        assert out["predict_per_item"] == out["data"]["chunk_length"]
+
 
 class TestFast:
     def test_smallest_vjepa21_backbone(self):

@@ -53,6 +53,7 @@ PRESETS = {
     # ── max ── biggest runnable backbone + 75% overlap ────────────────────────
     "max": {
         "backbone": "vjepa2_1_vitg_384",   # giant (~1.4B); gigantic via train-config
+        "predict_per_item": 64,            # keep head output == chunk_length (one pred/frame)
         "data": {
             "chunk_length": 64,
             "chunk_shift": 16,             # 75% overlap = chunk_length / 4

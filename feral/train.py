@@ -192,8 +192,9 @@ def main(cfg):
             else:
                 epochs_without_updates += 1
                 logger.info("Epoch %d: Didnt improve for %d epochs", epoch, epochs_without_updates)
-                if cfg['training']['patience'] is not None and epochs_without_updates >= cfg['training']['patience']:
-                    logger.info("Epoch %d: Early stopping: no improvement for %d epochs, stopping training.", epoch, cfg['training']['patience'])
+                patience = cfg['training'].get('patience')
+                if patience is not None and epochs_without_updates >= patience:
+                    logger.info("Epoch %d: Early stopping: no improvement for %d epochs, stopping training.", epoch, patience)
                     break
 
         logger.info("Finished training")

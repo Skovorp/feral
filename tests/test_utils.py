@@ -184,6 +184,19 @@ class TestGetWeights:
         w = get_weights(json_data, "inv_freq_sqrt", "cpu")
         assert w.shape == (3,)
 
+    def test_max_weight_caps_extreme_weights(self):
+        # 3 of class 0, 1 of class 1 → inv_freq [1.333, 4.0]; cap at 2.0.
+        json_data = self._make_json([0, 0, 0, 1])
+        w = get_weights(json_data, "inv_freq", "cpu", max_weight=2.0)
+        np.testing.assert_allclose(w.numpy(), [1 / 0.75, 2.0], rtol=1e-5)
+        assert w.max().item() <= 2.0
+
+    def test_max_weight_none_is_no_cap(self):
+        json_data = self._make_json([0, 0, 0, 1])
+        uncapped = get_weights(json_data, "inv_freq", "cpu")
+        capped_none = get_weights(json_data, "inv_freq", "cpu", max_weight=None)
+        np.testing.assert_allclose(capped_none.numpy(), uncapped.numpy(), rtol=1e-5)
+
 
 # ===================================================================
 # prep_for_answers

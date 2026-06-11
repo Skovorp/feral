@@ -106,6 +106,8 @@ def main(cfg):
 
     if train_loader is not None:
         model, model_ema = build_model(cfg, num_classes, device)
+        if wandb.run is not None:
+            wandb.run.summary['n_params'] = sum(p.numel() for p in model.parameters())
         criterion, optimizer, lr_scheduler, mixup = build_training_objects(
             cfg, model, train_dataset, train_loader, labels_json, device,
         )
@@ -121,11 +123,17 @@ def main(cfg):
                 num_classes=num_classes, is_multilabel=labels_json['is_multilabel'],
                 predict_per_item=cfg['predict_per_item'],
                 device=device, log_fn=wandb.log, max_batches=cfg.get('max_batches'),
+                grad_clip_norm=cfg['training'].get('grad_clip_norm'),
+                log_grad_norm=cfg['training'].get('log_grad_norm', True),
+                heavy_log_every=cfg['training'].get('heavy_log_every'),
             )
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'train'),
                 'train/loss': train_loss,
             }
+            if torch.cuda.is_available():
+                logs['perf/gpu_mem_gb'] = torch.cuda.max_memory_allocated() / 1e9
+                torch.cuda.reset_peak_memory_stats()
             logger.info("%s", logs)
             wandb.log(logs)
 

@@ -46,30 +46,39 @@ def get_class_frequencies(labels_arr, num_classes=None):
         freqs = labels_arr.mean(axis=0)
     return freqs
 
-def get_weights(json_data, weight_type, device):
+def get_weights(json_data, weight_type, device, max_weight=None):
     assert weight_type is None or weight_type in ('inv_freq', 'inv_freq_sqrt'), "weight_type should be 'inv_freq', 'inv_freq_sqrt' or None"
     if weight_type is None:
-        return None 
+        return None
     arr = np.concatenate([json_data['labels'][x] for x in json_data['splits']['train']])
     # Pass num_classes so bincount covers declared classes even when the train
     # split has zero examples of a high-index class (otherwise the returned
     # weight tensor is too short and CrossEntropyLoss crashes).
     num_classes = len(json_data['class_names'])
     freqs = torch.tensor(get_class_frequencies(arr, num_classes=num_classes))
-    
+
     if len(arr.shape) == 1:
         ratio = (1.0 / freqs).to(device)
     elif len(arr.shape) == 2:
-        ratio = ((1 - freqs) / freqs).to(device)    
-    if freqs.min().item() <= 0: 
+        ratio = ((1 - freqs) / freqs).to(device)
+    if freqs.min().item() <= 0:
         logger.warning("Some classes don't have any examples. Class frequencies: %s", freqs)
         ratio = torch.clamp(ratio, max=1000000.0)
-        
+
     if weight_type == 'inv_freq':
-        return ratio
+        weights = ratio
     elif weight_type == 'inv_freq_sqrt':
-        return torch.sqrt(ratio)
-    
+        weights = torch.sqrt(ratio)
+
+    # Optional cap: extreme inverse-frequency weights for ultra-rare classes can
+    # blow up the loss (esp. BCE pos_weight); capping stabilizes those runs.
+    if max_weight is not None:
+        pre_max = weights.max().item()
+        if pre_max > max_weight:
+            logger.info("Capping class weights at %.1f (was max=%.2f)", max_weight, pre_max)
+        weights = torch.clamp(weights, max=float(max_weight))
+    return weights
+
 
 def get_random_run_name():
     sizes = [

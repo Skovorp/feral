@@ -196,7 +196,7 @@ def main():
     p_train.add_argument('label_json_path', help='Path to the label JSON file')
     p_train.add_argument('--mode', choices=['fast', 'max', 'rare'], default=None,
                          help='Preset recipe overlay: '
-                              'fast (smallest V-JEPA 2.1 + Parkinson recipe, cheapest); '
+                              'fast (smallest V-JEPA 2.1, full fine-tune, cheapest); '
                               'max (largest runnable V-JEPA 2.1 + 75%% chunk overlap, best accuracy); '
                               'rare (rare-class robustness: EMA & mixup off + grad-clip + class-weight cap)')
     p_train.add_argument('--resolution', type=int, default=None,

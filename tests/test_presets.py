@@ -94,13 +94,17 @@ class TestFast:
         out = apply_mode(_base_cfg(), "fast")
         assert out["backbone"] == "vjepa2_1_vitb_384"
 
-    def test_full_finetune_parkinson_recipe(self):
+    def test_full_finetune_recipe(self):
         out = apply_mode(_base_cfg(), "fast")
         assert out["model"]["freeze_encoder_layers"] == 0
         assert out["training"]["lr"] == pytest.approx(4.0e-5)
-        # fast stays faithful to the Parkinson recipe: stabilization OFF.
+        # fast is a plain full fine-tune: stabilization OFF.
         assert out["training"].get("grad_clip_norm") in (None,)
         assert out["model"].get("max_class_weight") in (None,)
+
+    def test_ema_off(self):
+        out = apply_mode(_base_cfg(), "fast")
+        assert out["ema_decay"] is None
 
     def test_default_overlap_is_50pct(self):
         out = apply_mode(_base_cfg(), "fast")
@@ -119,6 +123,10 @@ class TestMax:
         assert cs == cl // 4
         assert (1 - cs / cl) == pytest.approx(0.75)
 
+    def test_ema_off(self):
+        out = apply_mode(_base_cfg(), "max")
+        assert out["ema_decay"] is None
+
 
 class TestRare:
     def test_ema_and_mixup_off(self):
@@ -130,6 +138,10 @@ class TestRare:
         out = apply_mode(_base_cfg(), "rare")
         assert out["training"]["grad_clip_norm"] == 1.0
         assert out["model"]["max_class_weight"] == 20
+
+    def test_label_smoothing_off(self):
+        out = apply_mode(_base_cfg(), "rare")
+        assert out["training"]["label_smoothing"] == 0.0
 
 
 class TestPublicAPI:

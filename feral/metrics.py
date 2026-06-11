@@ -17,6 +17,7 @@ from feral.dataset import get_frame_count
 logger = logging.getLogger(__name__)
 
 def calc_frame_level_map(ans, labels_json, partition):
+    """Ensemble per-frame predictions and return mean average precision over non-'other' classes."""
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
     logits = generate_empty_logits(labels_json, partition)
@@ -45,6 +46,11 @@ def calc_frame_level_map(ans, labels_json, partition):
     return sum(aps) / len(aps)
 
 def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
+    """Compute precision/recall/F1/accuracy (plus per-class F1) for non-'other' classes.
+
+    Single-label uses argmax with macro-averaging; multilabel thresholds logits at
+    multilabel_threshold per class and averages. Returns a dict keyed by '{prefix}/...'.
+    """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
 
@@ -135,6 +141,12 @@ def compute_optimal_per_class_thresholds(ans, labels_json, partition):
 
 
 def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+    """Per-class optimal-threshold best-F1 metrics (multilabel only).
+
+    Returns a dict with '{prefix}/best_f1_{name}' and '{prefix}/best_thr_{name}' per
+    class (nan for classes with no positives) and '{prefix}/best_f1' as their mean.
+    Returns {} for single-label.
+    """
     # Only defined for multilabel — per-class thresholds aren't simultaneously
     # applicable under single-label argmax, so the metric would be misleading.
     if not is_multilabel:
@@ -161,6 +173,10 @@ def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, pre
 
 
 def ensemble_predictions(ans, logits):
+    """Accumulate per-chunk predictions into per-frame logits (uniform weights), averaging
+    overlapping predictions and filling gaps by inverse-distance interpolation from the
+    nearest predicted frames on either side. Mutates and returns `logits`.
+    """
     predict_per_item = max(x[0][2] for x in ans) + 1
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
@@ -196,12 +212,17 @@ def ensemble_predictions(ans, logits):
     return logits
 
 def generate_empty_logits(labels_json, partition):
+    """Return dict[filename -> zeros array of shape (num_frames, num_classes)] for the partition."""
     logits = {}
     for k in labels_json['splits'][partition]:
         logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
     return logits
 
 def generate_raster_plot(ans, labels_json, partition):
+    """Build a single-label ethogram raster (prediction, label, mismatch rows) across all
+    videos in the partition, with per-video separators and a class legend. Returns a PIL
+    image; on failure logs the traceback and returns an 'Error' image instead.
+    """
     try:
         logits = generate_empty_logits(labels_json, partition)
         logits = ensemble_predictions(ans, logits)
@@ -408,6 +429,9 @@ def fig2img(fig):
     return img
 
 def calculate_multiclass_metrics(ans, class_names, prefix=''):
+    """Compute per-class average precision and mAP (over non-'other' classes) from a list of
+    (..., preds, targets) items. Returns a dict keyed by '{prefix}/ap_{name}' and '{prefix}/map'.
+    """
     preds = np.array([x[-2] for x in ans])
     targets = np.array([x[-1] for x in ans]).astype(int)
 
@@ -423,6 +447,10 @@ def calculate_multiclass_metrics(ans, class_names, prefix=''):
 
 
 def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(255, 255, 255), look_around=30, output_path='result.mp4'):
+    """Write an mp4 to output_path containing only frames near prediction/label mismatches
+    (within look_around frames), overlaying filename, frame index, true/pred class, and
+    per-class logits on each frame. Reads videos from `prefix`; skips unreadable files.
+    """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     logits = generate_empty_logits(labels_json, partition)
     logits = ensemble_predictions(ans, logits)
@@ -503,6 +531,10 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
 
 
 def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn):
+    """Ensemble inference predictions (and EMA predictions if present) into per-frame logits
+    and write them as JSON to save_fn under keys 'preds' and optionally 'ema_preds', each a
+    dict[filename -> list-of-lists]. Frame counts are read from the videos under video_prefix.
+    """
     out = {}
     
     ans_logits = {} 

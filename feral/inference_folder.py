@@ -26,6 +26,7 @@ VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
 
 
 def find_videos(folder):
+    """Return sorted video filenames in folder; warn on skipped non-videos, raise if none found."""
     all_files = [fn for fn in sorted(os.listdir(folder)) if os.path.isfile(os.path.join(folder, fn))]
     videos = [fn for fn in all_files if os.path.splitext(fn)[1].lower() in VIDEO_EXTENSIONS]
     logger.info("Found %d video files out of %d files in %s", len(videos), len(all_files), folder)
@@ -51,6 +52,7 @@ def build_inference_labels_json(video_filenames, class_names, is_multilabel):
 
 
 def _load_default_cfg():
+    """Load and return the packaged default_config.yaml as a dict."""
     with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
         with open(cfg_path, 'r') as f:
             return yaml.safe_load(f)
@@ -59,6 +61,14 @@ def _load_default_cfg():
 def run_inference_folder(checkpoint_path, video_folder, output=None,
                          batch_size=8, num_workers=4, compile=False,
                          mode=None, resolution=None):
+    """Run inference on every video in video_folder using a saved checkpoint and write results to JSON.
+
+    Reads the training cfg embedded in the checkpoint (falling back to
+    default_config.yaml for legacy checkpoints), applies optional inference-time
+    overrides (compile, mode -> chunk_shift, resolution -> resize_to), loads the
+    model and its class metadata, builds a chunk dataset/loader, runs inference,
+    and saves results to `output` (defaults to inference_<folder>.json).
+    """
     # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
     # Falling back to default_config only covers legacy checkpoints where the
     # cfg wasn't persisted — the data/model params in default_config may not

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def _to_prob(output, is_multilabel):
+    """Convert raw logits to probabilities: per-class sigmoid if multilabel, else softmax over dim 1."""
     return torch.sigmoid(output) if is_multilabel else torch.nn.functional.softmax(output, 1)
 
 

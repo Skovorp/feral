@@ -88,6 +88,7 @@ _IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def _get_entry(backbone):
+    """Return the BACKBONES config dict for backbone, or raise ValueError if unknown."""
     if backbone not in BACKBONES:
         raise ValueError(
             f"Unknown backbone {backbone!r}. Supported: {sorted(BACKBONES)}"
@@ -96,10 +97,12 @@ def _get_entry(backbone):
 
 
 def get_hidden_dim(backbone):
+    """Return the backbone's encoder hidden dimension (token feature size)."""
     return _get_entry(backbone)["hidden_dim"]
 
 
 def get_img_size(backbone):
+    """Return the native input resolution (px) the backbone's weights were trained at."""
     return _get_entry(backbone)["img_size"]
 
 
@@ -124,6 +127,13 @@ class BackboneAdapter(nn.Module):
     """
 
     def __init__(self, backbone, *, pretrained=True):
+        """Build the underlying encoder for backbone.
+
+        Dispatches on the entry's source: HF AutoModel (drops the predictor),
+        torch.hub V-JEPA 2.1, or VideoPrism (requires torch >= 2.5 and registers
+        ImageNet mean/std buffers for denormalization). pretrained=False builds a
+        randomly-initialized architecture from config with no weight download.
+        """
         super().__init__()
         entry = _get_entry(backbone)
         self.source = entry["source"]
@@ -173,6 +183,12 @@ class BackboneAdapter(nn.Module):
             raise ValueError(f"unknown source {self.source!r}")
 
     def forward(self, x):
+        """Encode a video batch into a flat patch-token sequence.
+
+        Takes x of shape (B, T, C, H, W) and returns (B, N, D). Per source: HF runs
+        with skip_predictor; hub permutes to (B, C, T, H, W); videoprism_hf permutes
+        to (B, T, H, W, C) and denormalizes ImageNet stats back to [0, 1] first.
+        """
         if self.source == "hf":
             return self.model(x, skip_predictor=True).last_hidden_state
         if self.source == "hub":
@@ -185,6 +201,7 @@ class BackboneAdapter(nn.Module):
         return self.model(pixel_values=x).last_hidden_state
 
     def num_encoder_layers(self):
+        """Return the number of transformer encoder layers in the underlying model."""
         if self.source == "hf":
             return len(self.model.encoder.layer)
         if self.source == "hub":
@@ -193,7 +210,14 @@ class BackboneAdapter(nn.Module):
         return len(self.model.videoprism.spatial_encoder.x_layers)
 
     def freeze_encoder(self, n_layers):
+        """Freeze the patch embedding and the first n_layers encoder layers.
+
+        Sets requires_grad=False on those params (raising ValueError if n_layers
+        exceeds the available count). For videoprism_hf only the spatial encoder is
+        frozen; its 4-layer temporal stack stays trainable.
+        """
         def _freeze(m):
+            """Set requires_grad=False on all parameters of module m."""
             for p in m.parameters():
                 p.requires_grad = False
 

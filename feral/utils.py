@@ -8,6 +8,12 @@ import os
 
 @torch.no_grad()
 def prep_for_answers(outputs, targets, names=None):
+    """Move outputs/targets to CPU lists and zip them into per-item tuples.
+
+    Flattens a nested `names` list if needed. Returns a list of tuples shaped
+    (name, output, target), (name, output), or (output, target) depending on
+    which of `names`/`targets` are provided.
+    """
     outputs = outputs.cpu().detach().tolist()
     if targets is not None:
         targets = targets.cpu().detach().tolist()
@@ -47,6 +53,13 @@ def get_class_frequencies(labels_arr, num_classes=None):
     return freqs
 
 def get_weights(json_data, weight_type, device, max_weight=None):
+    """Compute per-class loss weights from train-split label frequencies.
+
+    `weight_type` selects inverse-frequency ('inv_freq') or its square root
+    ('inv_freq_sqrt'); None returns None. Single-label uses 1/freq, multi-label
+    uses (1-freq)/freq. Zero-frequency classes are clamped, and `max_weight`
+    optionally caps the result. Returns a tensor on `device` (or None).
+    """
     assert weight_type is None or weight_type in ('inv_freq', 'inv_freq_sqrt'), "weight_type should be 'inv_freq', 'inv_freq_sqrt' or None"
     if weight_type is None:
         return None
@@ -81,6 +94,7 @@ def get_weights(json_data, weight_type, device, max_weight=None):
 
 
 def get_random_run_name():
+    """Generate a random 'size_adjective_animal' run name."""
     sizes = [
         "big", "huge", "giant", "massive", "jumbo", "colossal",
         "mega"
@@ -110,6 +124,8 @@ def get_random_run_name():
     ])
 
 def last_nonzero_index(arr):
+    """For each position, return the index of the most recent nonzero element
+    at or before it (-1 if none seen yet). Returns an int array like `arr`."""
     out = np.empty_like(arr, dtype=int)
     last_idx = -1
     for i in range(len(arr)):
@@ -119,6 +135,8 @@ def last_nonzero_index(arr):
     return out
 
 def next_nonzero_index(arr):
+    """For each position, return the index of the nearest nonzero element
+    at or after it (-1 if none follow). Returns an int array like `arr`."""
     out = np.empty_like(arr, dtype=int)
     next_idx = -1
     for i in reversed(range(len(arr))):
@@ -178,6 +196,8 @@ def check_environment(compile_enabled):
 
 
 def suggested_num_workers():
+    """Suggest a DataLoader worker count from available CPUs (affinity if
+    available, else os.cpu_count()). May return None if neither is available."""
     max_num_worker_suggest = None
     if hasattr(os, 'sched_getaffinity'):
         try:
@@ -193,6 +213,8 @@ def suggested_num_workers():
     return max_num_worker_suggest
 
 def save_model(model, path, metadata):
+    """Save the model's state_dict plus `metadata` to `path` via torch.save,
+    unwrapping a torch.compile `_orig_mod` wrapper if present."""
     m = model
     if hasattr(m, '_orig_mod'):
         m = m._orig_mod

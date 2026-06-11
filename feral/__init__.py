@@ -45,6 +45,7 @@ _LAZY = {
 
 
 def __getattr__(name):
+    """Lazily import and return a public symbol listed in ``_LAZY``; raise AttributeError otherwise."""
     if name in _LAZY:
         import importlib
         module_name, attr = _LAZY[name]
@@ -53,4 +54,5 @@ def __getattr__(name):
 
 
 def __dir__():
+    """Return the sorted public names (``__all__``) for tab-completion and ``dir(feral)``."""
     return sorted(__all__)

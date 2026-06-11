@@ -34,6 +34,7 @@ torch.backends.cuda.enable_math_sdp(False)
 torch.backends.cuda.enable_mem_efficient_sdp(False)
 
 def _str_now():
+    """Return the current local time as a filename-safe 'YYYY-MM-DD_HH-MM-SS' string."""
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
 
@@ -64,6 +65,11 @@ def _add_raster_logs(logs, answers, labels_json, partition, prefix, optimal_pref
         logger.exception("optimal raster plot failed for %s", optimal_prefix)
 
 def main(cfg):
+    """Run the full training/eval/inference pipeline for one config: build data, model,
+    and training objects, train with per-epoch validation and best-checkpoint selection
+    (with optional EMA and early stopping), then load the best checkpoint to run test
+    and/or inference. Logs metrics and raster plots to wandb and writes answers/checkpoints
+    to disk. Returns None."""
     check_environment(compile_enabled=cfg['training']['compile'])
 
     with open(cfg['data']['label_json'], 'r') as f:

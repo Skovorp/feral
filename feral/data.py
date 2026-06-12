@@ -3,6 +3,7 @@ import logging
 from torch.utils.data import DataLoader
 
 from feral.dataset import ClsDataset, collate_fn_val, collate_fn_inference
+from feral.utils import resolve_num_workers
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,8 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
 
     train_bs = cfg['training']['train_bs']
     val_bs = cfg['training']['val_bs']
-    num_workers = cfg['training']['num_workers']
+    num_workers = resolve_num_workers(cfg['training']['num_workers'])
+    logger.info("DataLoader num_workers=%d (config: %r)", num_workers, cfg['training']['num_workers'])
     persistent_workers = num_workers > 0
 
     for partition, spec in _PARTITION_SPECS.items():

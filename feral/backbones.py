@@ -162,7 +162,7 @@ class BackboneAdapter(nn.Module):
             # fine for the V-JEPA backbones). Fail with a clear message instead
             # of a cryptic ModuleNotFoundError deep inside trust_remote_code.
             try:
-                import torch.nn.attention.flex_attention  # noqa: F401
+                from torch.nn.attention import flex_attention  # noqa: F401
             except ModuleNotFoundError as e:
                 raise RuntimeError(
                     f"VideoPrism backbones require torch >= 2.5 (for "

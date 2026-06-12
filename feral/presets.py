@@ -27,14 +27,13 @@ rare : tuned for rare-class / rare-positive datasets — turns mixup and label
 PRESETS = {
     # ── fast ── full fine-tune, smallest backbone ─────────────────────────────
     "fast": {
-        "backbone": "vjepa2_1_vitb_384",   # smallest V-JEPA 2.1, native 384px
+        "backbone": "vjepa2_1_vitb_384",   # smallest V-JEPA 2.1 (384-native; fed at default 256)
         "model": {
             "freeze_encoder_layers": 0,    # full fine-tune
         },
-        "data": {
-            "resize_to": 384,              # match ViT-B/384 native size
-        },
         "ema_decay": None,                 # EMA OFF
+        # resize_to inherits default_config (256) — 384-native backbone runs at
+        # 256 via interpolated position embeddings; ~2.25x fewer tokens.
     },
 
     # ── max ── biggest runnable backbone + 75% overlap ────────────────────────
@@ -42,9 +41,9 @@ PRESETS = {
         "backbone": "vjepa2_1_vitg_384",   # giant (~1.4B); gigantic via train-config
         "data": {
             "chunk_shift": 16,             # 75% overlap = chunk_length / 4
-            "resize_to": 384,             # match ViT-g/384 native size
         },
         "ema_decay": None,                 # EMA OFF
+        # resize_to inherits default_config (256) — 384-native backbone fed at 256.
         # training recipe otherwise inherits default_config (freeze 12 keeps the
         # giant trainable on a single large GPU; full fine-tune would OOM for most).
     },
@@ -55,9 +54,6 @@ PRESETS = {
         "model": {
             "freeze_encoder_layers": 0,
             "max_class_weight": 20,        # cap extreme inverse-freq weights
-        },
-        "data": {
-            "resize_to": 384,
         },
         "training": {
             "label_smoothing": 0.0,        # label smoothing OFF — hurts with rare positives

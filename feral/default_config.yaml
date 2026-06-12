@@ -19,7 +19,7 @@ training:
   epochs: 10
   train_bs: 4
   val_bs: 8
-  num_workers: 4
+  num_workers: -1   # -1 = auto: min(16, CPUs available to the process); 0 = main process; or pin a positive int
   part_warmup: 0.2
   lr: 4.0e-5
   weight_decay: 0.1

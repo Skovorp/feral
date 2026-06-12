@@ -212,6 +212,39 @@ def suggested_num_workers():
             max_num_worker_suggest = cpu_count
     return max_num_worker_suggest
 
+
+# Hard cap on auto-resolved DataLoader workers. Above ~16, the video-decode
+# workers oversubscribe the CPU (decord is itself multithreaded) for little
+# throughput gain. The cap also guards against hosts — e.g. shared cloud GPU
+# boxes — that expose ALL host logical CPUs to the container, so affinity can
+# report a wildly inflated count (a 200+ vCPU host serving a small instance).
+MAX_AUTO_NUM_WORKERS = 16
+
+
+def resolve_num_workers(value, cap=MAX_AUTO_NUM_WORKERS):
+    """Resolve a config ``num_workers`` value to a concrete, validated int.
+
+    Auto-detect is requested with ``-1`` (à la scikit-learn's ``n_jobs=-1``),
+    which resolves to ``min(cap, CPUs available to this process)``. A
+    non-negative int is honored verbatim (``0`` = load in the main process; or
+    pin any positive count). This is the single normalization boundary — it
+    always returns an int and raises ``ValueError`` on anything else, so no
+    downstream code ever sees the sentinel.
+
+    The CPU count comes from :func:`suggested_num_workers`
+    (``os.sched_getaffinity``), which respects container cpuset limits — unlike
+    ``os.cpu_count()``, which returns the host count.
+    """
+    if value == -1:
+        n = suggested_num_workers() or 1
+        return max(1, min(cap, n))
+    # bool is an int subclass — reject True/False explicitly.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            f"num_workers must be -1 (auto) or a non-negative int, got {value!r}"
+        )
+    return value
+
 def save_model(model, path, metadata):
     """Save the model's state_dict plus `metadata` to `path` via torch.save,
     unwrapping a torch.compile `_orig_mod` wrapper if present."""

@@ -63,10 +63,11 @@ class TestApplyMode:
         assert out["backbone"] in BACKBONES
 
     @pytest.mark.parametrize("mode", sorted(PRESETS))
-    def test_resize_matches_backbone_native_size(self, mode):
+    def test_resize_inherits_default(self, mode):
+        # Presets no longer pin resize_to: the 384-native backbones are fed at
+        # the default 256 (fewer tokens / faster) via interpolated pos-embeds.
         out = apply_mode(_base_cfg(), mode)
-        native = BACKBONES[out["backbone"]]["img_size"]
-        assert out["data"]["resize_to"] == native
+        assert out["data"]["resize_to"] == 256
 
     @pytest.mark.parametrize("mode", sorted(PRESETS))
     def test_deep_merge_keeps_untouched_keys(self, mode):

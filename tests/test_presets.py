@@ -114,9 +114,13 @@ class TestFast:
 
 
 class TestMax:
-    def test_giant_backbone(self):
+    def test_vitl_backbone(self):
         out = apply_mode(_base_cfg(), "max")
-        assert out["backbone"] == "vjepa2_1_vitg_384"
+        assert out["backbone"] == "vjepa2_1_vitl_384"
+
+    def test_freezes_half_the_layers(self):
+        out = apply_mode(_base_cfg(), "max")
+        assert out["model"]["freeze_encoder_layers"] == 12
 
     def test_75pct_overlap(self):
         out = apply_mode(_base_cfg(), "max")

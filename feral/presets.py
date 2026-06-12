@@ -36,16 +36,17 @@ PRESETS = {
         # 256 via interpolated position embeddings; ~2.25x fewer tokens.
     },
 
-    # ── max ── biggest runnable backbone + 75% overlap ────────────────────────
+    # ── max ── ViT-L + 75% overlap ────────────────────────────────────────────
     "max": {
-        "backbone": "vjepa2_1_vitg_384",   # giant (~1.4B); gigantic via train-config
+        "backbone": "vjepa2_1_vitl_384",   # ViT-L (~300M), 384-native (fed at 256)
+        "model": {
+            "freeze_encoder_layers": 12,   # freeze half of ViT-L's 24 layers
+        },
         "data": {
-            "chunk_shift": 16,             # 75% overlap = chunk_length / 4
+            "chunk_shift": 16,             # 75% overlap = chunk_length / 4 (2x default's chunks)
         },
         "ema_decay": None,                 # EMA OFF
-        # resize_to inherits default_config (256) — 384-native backbone fed at 256.
-        # training recipe otherwise inherits default_config (freeze 12 keeps the
-        # giant trainable on a single large GPU; full fine-tune would OOM for most).
+        # resize_to inherits default_config (256).
     },
 
     # ── rare ── rare-class robustness ─────────────────────────────────────────
@@ -67,7 +68,7 @@ PRESETS = {
 # One-line descriptions for CLI --help / logging.
 MODE_HELP = {
     "fast": "smallest V-JEPA 2.1 (ViT-B/384), full fine-tune (cheapest)",
-    "max":  "largest runnable V-JEPA 2.1 + 75% chunk overlap (best accuracy)",
+    "max":  "ViT-L/384 (~300M), freeze half (12/24) + 75% chunk overlap (best accuracy)",
     "rare": "rare-class robustness: EMA, mixup & label smoothing off + grad-clip + class-weight cap",
 }
 

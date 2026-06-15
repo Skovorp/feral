@@ -40,12 +40,13 @@ class FeralModel(nn.Module):
             fc_drop_rate,
             freeze_encoder_layers=0,
             pretrained=True,
+            gradient_checkpointing=False,
             **kwargs):
         """Assemble the model: a backbone encoder, an attention-pooling projector (out_tokens =
         predict_per_item), batch-norm, dropout, and a linear classification head. Freezes the first
         freeze_encoder_layers backbone layers."""
         super().__init__()
-        self.backbone = BackboneAdapter(backbone, pretrained=pretrained)
+        self.backbone = BackboneAdapter(backbone, pretrained=pretrained, gradient_checkpointing=gradient_checkpointing)
         d = self.backbone.hidden_dim
 
         self.clip_projector = AttentionPoolingBlockCustom(

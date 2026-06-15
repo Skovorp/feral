@@ -126,7 +126,7 @@ class BackboneAdapter(nn.Module):
     Output: (B, N, D)       — flat sequence of patch tokens.
     """
 
-    def __init__(self, backbone, *, pretrained=True):
+    def __init__(self, backbone, *, pretrained=True, gradient_checkpointing=False):
         """Build the underlying encoder for backbone.
 
         Dispatches on the entry's source: HF AutoModel (drops the predictor),
@@ -148,6 +148,8 @@ class BackboneAdapter(nn.Module):
                 # randomly; useful for shape/wiring tests.
                 self.model = AutoModel.from_config(AutoConfig.from_pretrained(entry["slug"]))
             self.model.predictor = None
+            if gradient_checkpointing:
+                self.model.gradient_checkpointing_enable()
         elif self.source == "hub":
             encoder, _predictor = torch.hub.load(
                 "facebookresearch/vjepa2",
@@ -156,7 +158,14 @@ class BackboneAdapter(nn.Module):
                 trust_repo=True,
             )
             self.model = encoder
+            if gradient_checkpointing:
+                self.model.use_activation_checkpointing = True
         elif self.source == "videoprism_hf":
+            if gradient_checkpointing:
+                raise ValueError(
+                    "gradient_checkpointing is not supported for VideoPrism backbones. "
+                    "Use a V-JEPA 2 or V-JEPA 2.1 backbone, or disable gradient_checkpointing."
+                )
             # VideoPrism's modeling code uses torch.nn.attention.flex_attention,
             # which only exists in torch >= 2.5 (feral's floor is 2.4, which is
             # fine for the V-JEPA backbones). Fail with a clear message instead

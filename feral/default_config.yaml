@@ -5,6 +5,7 @@ model:
   fc_drop_rate: 0.5
   class_weights: inv_freq_sqrt
   freeze_encoder_layers: 12
+  gradient_checkpointing: false   # activation checkpointing: ~25-30% slower, big VRAM cut (fits ViT-L in ~9GB bs4). V-JEPA 2 / 2.1 only; errors on VideoPrism.
   max_class_weight: null   # cap inverse-frequency class/pos weights (null = no cap; e.g. 20 for rare classes)
 data:
   chunk_length: 64

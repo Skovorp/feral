@@ -42,6 +42,8 @@ def _cmd_train(args):
         cfg['data']['part_sample'] = args.part_subsample
     if args.subsample_keep_rare_threshold is not None:
         cfg['data']['subsample_keep_rare_threshold'] = args.subsample_keep_rare_threshold
+    if args.gradient_checkpointing:
+        cfg['model']['gradient_checkpointing'] = True
 
     if args.no_wandb:
         print("Skipping W&B (--no-wandb); metrics will be printed to stdout only.")
@@ -210,6 +212,9 @@ def main():
                          help='Fraction (0-1) of training samples to keep')
     p_train.add_argument('--subsample_keep_rare_threshold', type=float, default=None,
                          help='Keep all chunks with rare behaviors below this frequency threshold')
+    p_train.add_argument('--gradient-checkpointing', action='store_true',
+                         help='Enable activation/gradient checkpointing to cut VRAM (~25-30%% slower; '
+                              'fits V-JEPA ViT-L in ~9GB at bs4). Not supported for VideoPrism.')
     p_train.set_defaults(func=_cmd_train)
 
     # feral train-config

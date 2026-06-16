@@ -6,7 +6,7 @@ like torch are only imported when you touch a symbol that needs them)::
     import feral
     feral.run_training(cfg)                         # train from a config dict
     feral.run_inference_folder(ckpt, video_folder)  # inference on a folder
-    cfg = feral.apply_mode(cfg, "fast")             # apply a preset overlay
+    cfg = feral.apply_mode(cfg, "lite")             # apply a preset overlay
     from feral import BACKBONES, FeralModel, ClsDataset, validate_labels_json
 """
 

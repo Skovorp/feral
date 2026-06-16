@@ -18,7 +18,7 @@ def _load_default_config():
 # ── train ────────────────────────────────────────────────────────────────────
 
 def _cmd_train(args):
-    """Run the interactive `feral train` command: build cfg from the default config plus CLI args, optionally apply a --mode preset, interactively configure W&B logging (open/personal/skip), then call train.main(cfg)."""
+    """Run the interactive `feral train` command: build cfg from the default config plus CLI args, optionally apply a --mode preset, configure W&B logging (interactively open/personal/skip, or non-interactively via --no-wandb / --public-wandb), then call train.main(cfg)."""
     from urllib.parse import urlparse
     import wandb
     from feral.train import main as train_main
@@ -45,15 +45,22 @@ def _cmd_train(args):
     if args.gradient_checkpointing:
         cfg['model']['gradient_checkpointing'] = True
 
+    SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
+    SHARED_WANDB_ENTITY = "sposiboh"
+    SHARED_WANDB_PROJECT = "feral_public"
+
     if args.no_wandb:
         print("Skipping W&B (--no-wandb); metrics will be printed to stdout only.")
         cfg.pop('wandb', None)
         train_main(cfg)
         return
 
-    SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
-    SHARED_WANDB_ENTITY = "sposiboh"
-    SHARED_WANDB_PROJECT = "feral_public"
+    if args.public_wandb:
+        print("Logging to the shared public W&B account (--public-wandb); no prompt.")
+        wandb.login(key=SHARED_WANDB_KEY)
+        cfg['wandb'] = {'entity': SHARED_WANDB_ENTITY, 'project': SHARED_WANDB_PROJECT}
+        train_main(cfg)
+        return
 
     res = input(
         '\nWeights & Biases logging options:\n'
@@ -196,9 +203,9 @@ def main():
     p_train = subparsers.add_parser('train', help='Run interactive training pipeline')
     p_train.add_argument('video_folder', help='Path to the folder containing training videos')
     p_train.add_argument('label_json_path', help='Path to the label JSON file')
-    p_train.add_argument('--mode', choices=['fast', 'max', 'rare'], default=None,
+    p_train.add_argument('--mode', choices=['lite', 'max', 'rare'], default=None,
                          help='Preset recipe overlay: '
-                              'fast (smallest V-JEPA 2.1, full fine-tune, cheapest); '
+                              'lite (smallest V-JEPA 2.1, full fine-tune, cheapest); '
                               'max (largest runnable V-JEPA 2.1 + 75%% chunk overlap, best accuracy); '
                               'rare (rare-class robustness: EMA & mixup off + grad-clip + class-weight cap)')
     p_train.add_argument('--resolution', type=int, default=None,
@@ -206,6 +213,8 @@ def main():
                               'backbone-native default; V-JEPA interpolates positional embeddings.')
     p_train.add_argument('--no-wandb', action='store_true',
                          help='Disable Weights & Biases logging non-interactively; metrics print to stdout only.')
+    p_train.add_argument('--public-wandb', action='store_true',
+                         help='Log to the shared public W&B account non-interactively (skips the prompt; public).')
     p_train.add_argument('--checkpoint', '-c', default=None,
                          help='Path to a checkpoint to resume from')
     p_train.add_argument('--part_subsample', type=float, default=None,
@@ -231,9 +240,9 @@ def main():
     p_infer.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size (default: 8)')
     p_infer.add_argument('--num_workers', '-w', type=int, default=4, help='DataLoader workers (default: 4)')
     p_infer.add_argument('--compile', action='store_true', help='Compile model with torch.compile')
-    p_infer.add_argument('--mode', choices=['fast', 'max'], default=None,
+    p_infer.add_argument('--mode', choices=['lite', 'max'], default=None,
                          help='Inference overlap preset (model size is fixed by the checkpoint): '
-                              'fast (50%% chunk overlap, faster); max (75%% overlap, smoother labels, slower).')
+                              'lite (50%% chunk overlap, faster); max (75%% overlap, smoother labels, slower).')
     p_infer.add_argument('--resolution', type=int, default=None,
                          help='Override the square input resolution at inference (default: as trained, '
                               'read from the checkpoint).')

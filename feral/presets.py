@@ -10,7 +10,7 @@ datasets FERAL targets don't benefit from a weight average.
 
 Modes
 -----
-fast : smallest V-JEPA 2.1 (ViT-B/384), full fine-tune with 50% chunk overlap.
+lite : smallest V-JEPA 2.1 (ViT-B/384), full fine-tune with 50% chunk overlap.
        Cheapest to train and run.
 max  : largest *runnable* V-JEPA 2.1 (ViT-g/384) with 75% chunk overlap. Best
        accuracy; needs a large-VRAM GPU. (The gigantic ViT-G is available via
@@ -19,14 +19,14 @@ max  : largest *runnable* V-JEPA 2.1 (ViT-g/384) with 75% chunk overlap. Best
 rare : tuned for rare-class / rare-positive datasets — turns mixup and label
        smoothing OFF (both hurt when positives are scarce) and turns ON the
        stabilization knobs (grad-norm clip + class-weight cap). Built on the
-       fast backbone.
+       lite backbone.
 """
 
 # Sparse overlays, deep-merged onto default_config.yaml. Each preset names ONLY
 # the keys that differ from default_config.yaml; everything else is inherited.
 PRESETS = {
-    # ── fast ── full fine-tune, smallest backbone ─────────────────────────────
-    "fast": {
+    # ── lite ── full fine-tune, smallest backbone ─────────────────────────────
+    "lite": {
         "backbone": "vjepa2_1_vitb_384",   # smallest V-JEPA 2.1 (384-native; fed at default 256)
         "model": {
             "freeze_encoder_layers": 0,    # full fine-tune
@@ -67,7 +67,7 @@ PRESETS = {
 
 # One-line descriptions for CLI --help / logging.
 MODE_HELP = {
-    "fast": "smallest V-JEPA 2.1 (ViT-B/384), full fine-tune (cheapest)",
+    "lite": "smallest V-JEPA 2.1 (ViT-B/384), full fine-tune (cheapest)",
     "max":  "ViT-L/384 (~300M), freeze half (12/24) + 75% chunk overlap (best accuracy)",
     "rare": "rare-class robustness: EMA, mixup & label smoothing off + grad-clip + class-weight cap",
 }
@@ -100,10 +100,10 @@ def apply_mode(cfg, mode):
 def infer_chunk_shift(mode, chunk_length):
     """Chunk shift (stride) for inference-time overlap under a given mode.
 
-    fast -> 50% overlap (chunk_length / 2); max -> 75% overlap (chunk_length / 4).
+    lite -> 50% overlap (chunk_length / 2); max -> 75% overlap (chunk_length / 4).
     Returns None for modes that don't change inference chunking (e.g. ``rare``).
     """
-    if mode == "fast":
+    if mode == "lite":
         return max(1, chunk_length // 2)
     if mode == "max":
         return max(1, chunk_length // 4)

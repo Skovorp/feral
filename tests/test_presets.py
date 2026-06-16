@@ -54,7 +54,7 @@ class TestApplyMode:
     def test_does_not_mutate_input(self):
         cfg = _base_cfg()
         snapshot = copy.deepcopy(cfg)
-        apply_mode(cfg, "fast")
+        apply_mode(cfg, "lite")
         assert cfg == snapshot  # overlay returns a new dict, input untouched
 
     @pytest.mark.parametrize("mode", sorted(PRESETS))
@@ -90,25 +90,25 @@ class TestApplyMode:
         assert out["predict_per_item"] == out["data"]["chunk_length"]
 
 
-class TestFast:
+class TestLite:
     def test_smallest_vjepa21_backbone(self):
-        out = apply_mode(_base_cfg(), "fast")
+        out = apply_mode(_base_cfg(), "lite")
         assert out["backbone"] == "vjepa2_1_vitb_384"
 
     def test_full_finetune_recipe(self):
-        out = apply_mode(_base_cfg(), "fast")
+        out = apply_mode(_base_cfg(), "lite")
         assert out["model"]["freeze_encoder_layers"] == 0
         assert out["training"]["lr"] == pytest.approx(4.0e-5)
-        # fast is a plain full fine-tune: stabilization OFF.
+        # lite is a plain full fine-tune: stabilization OFF.
         assert out["training"].get("grad_clip_norm") in (None,)
         assert out["model"].get("max_class_weight") in (None,)
 
     def test_ema_off(self):
-        out = apply_mode(_base_cfg(), "fast")
+        out = apply_mode(_base_cfg(), "lite")
         assert out["ema_decay"] is None
 
     def test_default_overlap_is_50pct(self):
-        out = apply_mode(_base_cfg(), "fast")
+        out = apply_mode(_base_cfg(), "lite")
         cl, cs = out["data"]["chunk_length"], out["data"]["chunk_shift"]
         assert cs == cl // 2
 
@@ -172,8 +172,8 @@ class TestPublicAPI:
 
 
 class TestInferChunkShift:
-    def test_fast_is_50pct(self):
-        assert infer_chunk_shift("fast", 64) == 32
+    def test_lite_is_50pct(self):
+        assert infer_chunk_shift("lite", 64) == 32
 
     def test_max_is_75pct(self):
         assert infer_chunk_shift("max", 64) == 16

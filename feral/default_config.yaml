@@ -31,7 +31,7 @@ training:
   log_grad_norm: true      # log global grad-norm every step even when not clipping (cheap)
   heavy_log_every: null    # if set (e.g. 200), every N steps log per-layer grad/weight-norm + per-element loss histograms
 mixup_alpha: 0.8
-ema_decay: 0.999
+ema_decay: null
 seed: 0
 device: "cuda"
 starting_checkpoint: null

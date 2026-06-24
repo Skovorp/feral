@@ -114,23 +114,30 @@ class TestLite:
 
 
 class TestMax:
-    def test_vitl_backbone(self):
-        out = apply_mode(_base_cfg(), "max")
-        assert out["backbone"] == "vjepa2_1_vitl_384"
+    def test_backbone_inherits_default(self):
+        # max no longer overrides the backbone — it rides the default recipe.
+        base = _base_cfg()
+        out = apply_mode(base, "max")
+        assert out["backbone"] == base["backbone"]
 
-    def test_freezes_half_the_layers(self):
-        out = apply_mode(_base_cfg(), "max")
-        assert out["model"]["freeze_encoder_layers"] == 12
+    def test_freeze_inherits_default(self):
+        base = _base_cfg()
+        out = apply_mode(base, "max")
+        assert out["model"]["freeze_encoder_layers"] == base["model"]["freeze_encoder_layers"]
 
-    def test_75pct_overlap(self):
+    def test_66pct_overlap(self):
         out = apply_mode(_base_cfg(), "max")
         cl, cs = out["data"]["chunk_length"], out["data"]["chunk_shift"]
-        assert cs == cl // 4
-        assert (1 - cs / cl) == pytest.approx(0.75)
+        assert cs == 21          # matches configs/.../camls_dense_overlap_66.yaml
+        assert cs == cl // 3
+        assert (1 - cs / cl) == pytest.approx(0.67, abs=0.01)  # ~66% by repo convention
 
-    def test_ema_off(self):
-        out = apply_mode(_base_cfg(), "max")
-        assert out["ema_decay"] is None
+    def test_ema_on(self):
+        # max re-enables EMA even when default disables it.
+        base = _base_cfg()
+        base["ema_decay"] = None
+        out = apply_mode(base, "max")
+        assert out["ema_decay"] == 0.999
 
 
 class TestRare:
@@ -175,8 +182,8 @@ class TestInferChunkShift:
     def test_lite_is_50pct(self):
         assert infer_chunk_shift("lite", 64) == 32
 
-    def test_max_is_75pct(self):
-        assert infer_chunk_shift("max", 64) == 16
+    def test_max_is_66pct(self):
+        assert infer_chunk_shift("max", 64) == 21
 
     def test_rare_is_noop(self):
         assert infer_chunk_shift("rare", 64) is None

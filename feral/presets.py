@@ -5,17 +5,17 @@ deep-merged onto the packaged ``default_config.yaml`` so the base recipe stays
 the single source of truth. Exposed on the CLI via ``feral train --mode`` and
 ``feral infer --mode``.
 
-Every preset disables EMA (``ema_decay: None``) — the small fine-tuning
-datasets FERAL targets don't benefit from a weight average.
+``lite`` and ``rare`` disable EMA (``ema_decay: None``) — the small full
+fine-tunes they target don't benefit from a weight average. ``max`` turns EMA
+back on (``ema_decay: 0.999``), matching the SOTA CalMS21 recipe.
 
 Modes
 -----
 lite : smallest V-JEPA 2.1 (ViT-B/384), full fine-tune with 50% chunk overlap.
        Cheapest to train and run.
-max  : largest *runnable* V-JEPA 2.1 (ViT-g/384) with 75% chunk overlap. Best
-       accuracy; needs a large-VRAM GPU. (The gigantic ViT-G is available via
-       ``train-config`` with ``backbone: vjepa2_1_vitgg_384`` for users who can
-       afford it.)
+max  : same backbone as ``default`` (no override), but bumps the temporal
+       overlap to 66% (``chunk_shift`` 21) and keeps EMA on. This is the recipe
+       that, in our comparison experiments, achieves SOTA on CalMS21.
 rare : tuned for rare-class / rare-positive datasets — turns mixup and label
        smoothing OFF (both hurt when positives are scarce) and turns ON the
        stabilization knobs (grad-norm clip + class-weight cap). Built on the
@@ -36,17 +36,13 @@ PRESETS = {
         # 256 via interpolated position embeddings; ~2.25x fewer tokens.
     },
 
-    # ── max ── ViT-L + 75% overlap ────────────────────────────────────────────
+    # ── max ── default backbone + 66% overlap + EMA ─────────────────────────
     "max": {
-        "backbone": "vjepa2_1_vitl_384",   # ViT-L (~300M), 384-native (fed at 256)
-        "model": {
-            "freeze_encoder_layers": 12,   # freeze half of ViT-L's 24 layers
-        },
         "data": {
-            "chunk_shift": 16,             # 75% overlap = chunk_length / 4 (2x default's chunks)
+            "chunk_shift": 21,             # 66% overlap = chunk_length / 3 (default is 50%); SOTA on CalMS21
         },
-        "ema_decay": None,                 # EMA OFF
-        # resize_to inherits default_config (256).
+        "ema_decay": 0.999,                # EMA ON (default disables it; max re-enables)
+        # backbone, freeze_encoder_layers, resize_to all inherit default_config.
     },
 
     # ── rare ── rare-class robustness ─────────────────────────────────────────
@@ -68,7 +64,7 @@ PRESETS = {
 # One-line descriptions for CLI --help / logging.
 MODE_HELP = {
     "lite": "smallest V-JEPA 2.1 (ViT-B/384), full fine-tune (cheapest)",
-    "max":  "ViT-L/384 (~300M), freeze half (12/24) + 75% chunk overlap (best accuracy)",
+    "max":  "default backbone + 66% chunk overlap + EMA on (SOTA on CalMS21)",
     "rare": "rare-class robustness: EMA, mixup & label smoothing off + grad-clip + class-weight cap",
 }
 
@@ -100,11 +96,11 @@ def apply_mode(cfg, mode):
 def infer_chunk_shift(mode, chunk_length):
     """Chunk shift (stride) for inference-time overlap under a given mode.
 
-    lite -> 50% overlap (chunk_length / 2); max -> 75% overlap (chunk_length / 4).
+    lite -> 50% overlap (chunk_length / 2); max -> 66% overlap (chunk_length / 3).
     Returns None for modes that don't change inference chunking (e.g. ``rare``).
     """
     if mode == "lite":
         return max(1, chunk_length // 2)
     if mode == "max":
-        return max(1, chunk_length // 4)
+        return max(1, chunk_length // 3)
     return None

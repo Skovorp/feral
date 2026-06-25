@@ -31,18 +31,32 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
     logger.info("DataLoader num_workers=%d (config: %r)", num_workers, cfg['training']['num_workers'])
     persistent_workers = num_workers > 0
 
+    # eval_chunk_shift / eval_smoothing_window are eval-only knobs, not ClsDataset
+    # args. Pull them out of the data kwargs; eval_chunk_shift overrides chunk_shift
+    # for val/test/inference so eval/inference can run a denser overlap than training
+    # (eval_smoothing_window is applied later, at ensembling time, not here).
+    data_kwargs = dict(cfg['data'])
+    eval_chunk_shift = data_kwargs.pop('eval_chunk_shift', None)
+    data_kwargs.pop('eval_smoothing_window', None)
+
     for partition, spec in _PARTITION_SPECS.items():
         split = labels_json['splits'].get(partition)
         if not split:
             logger.info("No %s dataset", partition)
             continue
 
+        part_kwargs = dict(data_kwargs)
+        if partition != 'train' and eval_chunk_shift is not None:
+            logger.info("%s: eval_chunk_shift overrides chunk_shift %s -> %s",
+                        partition, part_kwargs.get('chunk_shift'), eval_chunk_shift)
+            part_kwargs['chunk_shift'] = eval_chunk_shift
+
         dataset = ClsDataset(
             partition=partition,
             label_json_dict=labels_json,
             num_classes=num_classes,
             predict_per_item=cfg['predict_per_item'],
-            **cfg['data'],
+            **part_kwargs,
         )
 
         if partition != 'inference':

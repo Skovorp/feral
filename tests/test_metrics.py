@@ -6,6 +6,8 @@ from feral.metrics import (
     calculate_f1_metrics,
     ensemble_predictions,
     generate_empty_logits,
+    postprocess_predictions,
+    smooth_per_frame_probs,
 )
 
 
@@ -36,17 +38,6 @@ def _multilabel_labels_json(n_classes=3, n_frames=10):
         "labels": labels,
         "splits": {"val": ["vid.mp4"]},
     }
-
-
-def _make_ans(logits_dict, n_chunks=1):
-    """Build an `ans` list from a logits dict as if every frame was predicted
-    once (chunk_ind=0) with `n_chunks` total chunks."""
-    ans = []
-    for fn, arr in logits_dict.items():
-        for frame_idx in range(arr.shape[0]):
-            key = (fn, frame_idx, n_chunks - 1)  # chunk_ind = n_chunks-1 so max is correct
-            ans.append((key, arr[frame_idx].tolist()))
-    return ans
 
 
 # ===================================================================
@@ -135,6 +126,76 @@ class TestEnsemblePredictions:
 
 
 # ===================================================================
+# smooth_per_frame_probs / eval_smoothing_window
+# ===================================================================
+
+class TestSmoothPerFrameProbs:
+    def test_none_window_is_identity(self):
+        arr = np.array([[0.0], [1.0], [0.0]])
+        np.testing.assert_array_equal(smooth_per_frame_probs(arr, None), arr)
+
+    def test_window_one_is_identity(self):
+        arr = np.array([[0.0], [1.0], [0.0]])
+        np.testing.assert_array_equal(smooth_per_frame_probs(arr, 1), arr)
+
+    def test_window_geq_length_is_noop(self):
+        # A window >= T would collapse every frame to the video-wide mean; we
+        # treat it as a no-op instead.
+        arr = np.array([[0.0], [1.0], [0.0]])
+        np.testing.assert_array_equal(smooth_per_frame_probs(arr, 5), arr)
+
+    def test_centered_average_spike(self):
+        # A single spike spreads into its 3-frame neighborhood; edges divide by
+        # the number of real frames in the (truncated) window.
+        arr = np.array([[0.0], [0.0], [3.0], [0.0], [0.0]])
+        out = smooth_per_frame_probs(arr, 3)
+        np.testing.assert_allclose(out[:, 0], [0.0, 1.0, 1.0, 1.0, 0.0])
+
+    def test_constant_signal_preserved_at_boundaries(self):
+        # A constant signal must stay constant everywhere — boundary truncation
+        # normalizes by the count of contributing frames, not the window size.
+        arr = np.full((4, 1), 2.0)
+        out = smooth_per_frame_probs(arr, 3)
+        np.testing.assert_allclose(out[:, 0], [2.0, 2.0, 2.0, 2.0])
+
+    def test_channels_smoothed_independently(self):
+        arr = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 3.0], [1.0, 0.0], [1.0, 0.0]])
+        out = smooth_per_frame_probs(arr, 3)
+        np.testing.assert_allclose(out[:, 0], [1.0, 1.0, 1.0, 1.0, 1.0])  # constant channel untouched
+        np.testing.assert_allclose(out[:, 1], [0.0, 1.0, 1.0, 1.0, 0.0])  # spike channel smoothed
+
+
+class TestPostprocessPredictions:
+    def test_smooths_ensembled_matrix(self):
+        preds = {"a.mp4": np.array([[0.0], [0.0], [3.0], [0.0], [0.0]])}
+        result = postprocess_predictions(preds, smoothing_window=3)
+        np.testing.assert_allclose(result["a.mp4"][:, 0], [0.0, 1.0, 1.0, 1.0, 0.0])
+
+    def test_chains_with_ensemble(self):
+        logits = {"a.mp4": np.zeros((5, 1))}
+        raw = [0.0, 0.0, 3.0, 0.0, 0.0]
+        ans = [(("a.mp4", i, 0), [raw[i]]) for i in range(5)]
+        result = postprocess_predictions(ensemble_predictions(ans, logits), smoothing_window=3)
+        np.testing.assert_allclose(result["a.mp4"][:, 0], [0.0, 1.0, 1.0, 1.0, 0.0])
+
+    def test_does_not_cross_video_boundary(self):
+        preds = {
+            "a.mp4": np.full((3, 1), 1.0),
+            "b.mp4": np.full((3, 1), 5.0),
+        }
+        result = postprocess_predictions(preds, smoothing_window=3)
+        # Each video keeps its own constant level — no bleed across the boundary.
+        np.testing.assert_allclose(result["a.mp4"][:, 0], [1.0, 1.0, 1.0])
+        np.testing.assert_allclose(result["b.mp4"][:, 0], [5.0, 5.0, 5.0])
+
+    def test_none_window_leaves_matrix_untouched(self):
+        preds = {"a.mp4": np.array([[0.0, 1.0], [1.0, 0.0], [0.0, 1.0], [1.0, 0.0]])}
+        original = preds["a.mp4"].copy()
+        result = postprocess_predictions(preds, smoothing_window=None)
+        np.testing.assert_array_equal(result["a.mp4"], original)
+
+
+# ===================================================================
 # calc_frame_level_map
 # ===================================================================
 
@@ -150,8 +211,7 @@ class TestCalcFrameLevelMap:
         for i in range(n_frames):
             logits["vid.mp4"][i, targets[i]] = 10.0
 
-        ans = _make_ans(logits)
-        result = calc_frame_level_map(ans, labels_json, "val")
+        result = calc_frame_level_map(logits, labels_json, "val")
         assert result == pytest.approx(1.0)
 
     def test_perfect_multilabel(self):
@@ -166,8 +226,7 @@ class TestCalcFrameLevelMap:
                 if targets[i, c] == 1:
                     logits["vid.mp4"][i, c] = 10.0
 
-        ans = _make_ans(logits)
-        result = calc_frame_level_map(ans, labels_json, "val")
+        result = calc_frame_level_map(logits, labels_json, "val")
         assert result == pytest.approx(1.0)
 
     def test_other_excluded_from_map(self):
@@ -184,8 +243,7 @@ class TestCalcFrameLevelMap:
         logits = {"vid.mp4": np.zeros((n_frames, 2))}
         logits["vid.mp4"][:, 0] = 10.0
 
-        ans = _make_ans(logits)
-        result = calc_frame_level_map(ans, labels_json, "val")
+        result = calc_frame_level_map(logits, labels_json, "val")
         # mAP should be 1.0 since only class 0 counts
         assert result == pytest.approx(1.0)
 
@@ -204,8 +262,7 @@ class TestCalculateF1Metrics:
         for i in range(n_frames):
             logits["vid.mp4"][i, targets[i]] = 10.0
 
-        ans = _make_ans(logits)
-        res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="test", multilabel_threshold=0.5)
+        res = calculate_f1_metrics(logits, labels_json, "val", is_multilabel=False, prefix="test", multilabel_threshold=0.5)
         assert res["test/f1"] == pytest.approx(1.0)
         assert res["test/accuracy"] == pytest.approx(1.0)
         assert res["test/precision"] == pytest.approx(1.0)
@@ -222,8 +279,7 @@ class TestCalculateF1Metrics:
                 if targets[i, c] == 1:
                     logits["vid.mp4"][i, c] = 10.0
 
-        ans = _make_ans(logits)
-        res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=True, prefix="test", multilabel_threshold=0.0)
+        res = calculate_f1_metrics(logits, labels_json, "val", is_multilabel=True, prefix="test", multilabel_threshold=0.0)
         assert res["test/f1"] == pytest.approx(1.0)
         assert res["test/accuracy"] == pytest.approx(1.0)
 
@@ -239,8 +295,7 @@ class TestCalculateF1Metrics:
         logits = {"vid.mp4": np.zeros((n_frames, n_classes))}
         logits["vid.mp4"][:, 1] = 10.0
 
-        ans = _make_ans(logits)
-        res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
+        res = calculate_f1_metrics(logits, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
         assert res["t/f1"] == pytest.approx(0.0)
         assert res["t/accuracy"] == pytest.approx(0.0)
 
@@ -253,8 +308,7 @@ class TestCalculateF1Metrics:
         for i in range(n_frames):
             logits["vid.mp4"][i, targets[i]] = 10.0
 
-        ans = _make_ans(logits)
-        res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="v", multilabel_threshold=0.5)
+        res = calculate_f1_metrics(logits, labels_json, "val", is_multilabel=False, prefix="v", multilabel_threshold=0.5)
         for i in range(n_classes):
             assert f"v/f1_cls{i}" in res
 
@@ -269,8 +323,7 @@ class TestCalculateF1Metrics:
         logits = {"vid.mp4": np.zeros((n_frames, 2))}
         logits["vid.mp4"][:, 0] = 10.0
 
-        ans = _make_ans(logits)
-        res = calculate_f1_metrics(ans, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
+        res = calculate_f1_metrics(logits, labels_json, "val", is_multilabel=False, prefix="t", multilabel_threshold=0.5)
         # Only class 0 ("walk") counts, and it's perfect
         assert res["t/f1"] == pytest.approx(1.0)
 

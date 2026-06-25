@@ -8,6 +8,7 @@ from feral.presets import (
     PRESETS,
     apply_mode,
     infer_chunk_shift,
+    infer_smoothing_window,
 )
 
 
@@ -125,12 +126,25 @@ class TestMax:
         out = apply_mode(base, "max")
         assert out["model"]["freeze_encoder_layers"] == base["model"]["freeze_encoder_layers"]
 
-    def test_66pct_overlap(self):
+    def test_66pct_train_overlap(self):
+        # max still TRAINS at 66% overlap (chunk_shift); eval/inference are denser.
         out = apply_mode(_base_cfg(), "max")
         cl, cs = out["data"]["chunk_length"], out["data"]["chunk_shift"]
         assert cs == 21          # matches configs/.../camls_dense_overlap_66.yaml
         assert cs == cl // 3
         assert (1 - cs / cl) == pytest.approx(0.67, abs=0.01)  # ~66% by repo convention
+
+    def test_80pct_eval_overlap(self):
+        # max EVALUATES/INFERS at a denser 80% overlap via eval_chunk_shift.
+        out = apply_mode(_base_cfg(), "max")
+        cl, ecs = out["data"]["chunk_length"], out["data"]["eval_chunk_shift"]
+        assert ecs == 12         # 80% overlap = chunk_length // 5, same convention as ablation configs
+        assert ecs == cl // 5
+        assert (1 - ecs / cl) == pytest.approx(0.80, abs=0.02)
+
+    def test_eval_smoothing_window_is_9(self):
+        out = apply_mode(_base_cfg(), "max")
+        assert out["data"]["eval_smoothing_window"] == 9
 
     def test_ema_on(self):
         # max re-enables EMA even when default disables it.
@@ -182,11 +196,26 @@ class TestInferChunkShift:
     def test_lite_is_50pct(self):
         assert infer_chunk_shift("lite", 64) == 32
 
-    def test_max_is_66pct(self):
-        assert infer_chunk_shift("max", 64) == 21
+    def test_max_is_80pct(self):
+        # max infers at 80% overlap (chunk_length // 5), matching eval_chunk_shift.
+        assert infer_chunk_shift("max", 64) == 12
 
     def test_rare_is_noop(self):
         assert infer_chunk_shift("rare", 64) is None
 
     def test_never_returns_zero(self):
         assert infer_chunk_shift("max", 2) == 1
+
+
+class TestInferSmoothingWindow:
+    def test_max_smooths_9(self):
+        assert infer_smoothing_window("max") == 9
+
+    def test_lite_is_noop(self):
+        assert infer_smoothing_window("lite") is None
+
+    def test_rare_is_noop(self):
+        assert infer_smoothing_window("rare") is None
+
+    def test_none_is_noop(self):
+        assert infer_smoothing_window(None) is None

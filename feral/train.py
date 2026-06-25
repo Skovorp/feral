@@ -9,7 +9,7 @@ import json
 import datetime
 import numpy as np
 import random
-from feral.metrics import generate_empty_logits, ensemble_predictions
+from feral.metrics import generate_empty_logits, ensemble_predictions, postprocess_predictions
 from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics, calculate_optimal_f1_metrics, generate_multilabel_raster_plot, compute_optimal_per_class_thresholds
 import sys
 import os
@@ -38,19 +38,20 @@ def _str_now():
     return datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
 
-def _add_raster_logs(logs, answers, labels_json, partition, prefix, optimal_prefix, multilabel_threshold):
+def _add_raster_logs(logs, predictions, labels_json, partition, prefix, optimal_prefix, multilabel_threshold):
     """
     Adds raster image entries to `logs` under `{prefix}/raster_plot` (regular
     threshold) and, for multilabel, `{optimal_prefix}/raster_plot` (per-class
-    optimal-F1 thresholds). Every step is guarded; failures are logged but never
-    raised, so a broken plot can't kill training.
+    optimal-F1 thresholds). `predictions` is the post-processed per-frame matrix
+    dict. Every step is guarded; failures are logged but never raised, so a broken
+    plot can't kill training.
     """
     is_ml = labels_json['is_multilabel']
     try:
         if is_ml:
-            img = generate_multilabel_raster_plot(answers, labels_json, partition, multilabel_threshold)
+            img = generate_multilabel_raster_plot(predictions, labels_json, partition, multilabel_threshold)
         else:
-            img = generate_raster_plot(answers, labels_json, partition)
+            img = generate_raster_plot(predictions, labels_json, partition)
         logs[f'{prefix}/raster_plot'] = wandb.Image(img)
     except Exception:
         logger.exception("regular raster plot failed for %s", prefix)
@@ -58,8 +59,8 @@ def _add_raster_logs(logs, answers, labels_json, partition, prefix, optimal_pref
     if not is_ml or optimal_prefix is None:
         return
     try:
-        opt_thr = compute_optimal_per_class_thresholds(answers, labels_json, partition)
-        img = generate_multilabel_raster_plot(answers, labels_json, partition, opt_thr)
+        opt_thr = compute_optimal_per_class_thresholds(predictions, labels_json, partition)
+        img = generate_multilabel_raster_plot(predictions, labels_json, partition, opt_thr)
         logs[f'{optimal_prefix}/raster_plot'] = wandb.Image(img)
     except Exception:
         logger.exception("optimal raster plot failed for %s", optimal_prefix)
@@ -79,6 +80,10 @@ def main(cfg):
 
     class_names = {int(x): y for x, y in labels_json['class_names'].items()}
     num_classes = len(class_names)
+    # Per-frame smoothing applied to ensembled probabilities at val/test/inference
+    # (None = off). chunk overlap for those partitions is handled in data.py via
+    # eval_chunk_shift.
+    eval_smoothing = cfg['data'].get('eval_smoothing_window')
     model_save_metadata = {
         'class_names': class_names,
         'is_multilabel': labels_json['is_multilabel'],
@@ -161,23 +166,28 @@ def main(cfg):
                 )
             with open(os.path.join("answers", f"{cfg['run_name']}_{_str_now()}.json"), 'w') as f:
                 json.dump(answers, f)
+            # Ensemble + smooth the per-frame predictions once, then feed every metric.
+            val_preds = postprocess_predictions(
+                ensemble_predictions(answers, generate_empty_logits(labels_json, 'val')), eval_smoothing)
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'val'),
-                **calculate_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val', cfg['multilabel_threshold']),
-                **calculate_optimal_f1_metrics(answers, labels_json, 'val', labels_json['is_multilabel'], 'val_optimal'),
-                'val/frame_level_map': calc_frame_level_map(answers, labels_json, 'val'),
+                **calculate_f1_metrics(val_preds, labels_json, 'val', labels_json['is_multilabel'], 'val', cfg['multilabel_threshold']),
+                **calculate_optimal_f1_metrics(val_preds, labels_json, 'val', labels_json['is_multilabel'], 'val_optimal'),
+                'val/frame_level_map': calc_frame_level_map(val_preds, labels_json, 'val'),
                 'val/loss': val_loss,
             }
-            _add_raster_logs(logs, answers, labels_json, 'val', 'val', 'val_optimal', cfg['multilabel_threshold'])
+            _add_raster_logs(logs, val_preds, labels_json, 'val', 'val', 'val_optimal', cfg['multilabel_threshold'])
             if model_ema is not None:
+                val_ema_preds = postprocess_predictions(
+                    ensemble_predictions(answers_ema, generate_empty_logits(labels_json, 'val')), eval_smoothing)
                 ema_logs = {
                     **calculate_multiclass_metrics(answers_ema, class_names, 'val_ema'),
-                    **calculate_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'val_ema', cfg['multilabel_threshold']),
-                    **calculate_optimal_f1_metrics(answers_ema, labels_json, 'val', labels_json['is_multilabel'], 'val_ema_optimal'),
-                    'val_ema/frame_level_map': calc_frame_level_map(answers_ema, labels_json, 'val'),
+                    **calculate_f1_metrics(val_ema_preds, labels_json, 'val', labels_json['is_multilabel'], 'val_ema', cfg['multilabel_threshold']),
+                    **calculate_optimal_f1_metrics(val_ema_preds, labels_json, 'val', labels_json['is_multilabel'], 'val_ema_optimal'),
+                    'val_ema/frame_level_map': calc_frame_level_map(val_ema_preds, labels_json, 'val'),
                     'val_ema/loss': ema_val_loss,
                 }
-                _add_raster_logs(ema_logs, answers_ema, labels_json, 'val', 'val_ema', 'val_ema_optimal', cfg['multilabel_threshold'])
+                _add_raster_logs(ema_logs, val_ema_preds, labels_json, 'val', 'val_ema', 'val_ema_optimal', cfg['multilabel_threshold'])
                 logs.update(ema_logs)
             logger.info("%s", logs)
             wandb.log(logs)
@@ -230,8 +240,8 @@ def main(cfg):
         )
         with open(os.path.join("answers", f"{cfg['run_name']}_raw_test.json"), 'w') as f:
             json.dump(answers, f)
-        predictions = generate_empty_logits(labels_json, 'test')
-        predictions = ensemble_predictions(answers, predictions)
+        predictions = postprocess_predictions(
+            ensemble_predictions(answers, generate_empty_logits(labels_json, 'test')), eval_smoothing)
         with open(os.path.join("answers", f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
             if labels_json['is_multilabel']:
                 json.dump({
@@ -247,11 +257,11 @@ def main(cfg):
                 }, f)
         logs = {
             **calculate_multiclass_metrics(answers, class_names, 'test'),
-            **calculate_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test', cfg['multilabel_threshold']),
-            **calculate_optimal_f1_metrics(answers, labels_json, 'test', labels_json['is_multilabel'], 'test_optimal'),
-            'test/frame_level_map': calc_frame_level_map(answers, labels_json, 'test'),
+            **calculate_f1_metrics(predictions, labels_json, 'test', labels_json['is_multilabel'], 'test', cfg['multilabel_threshold']),
+            **calculate_optimal_f1_metrics(predictions, labels_json, 'test', labels_json['is_multilabel'], 'test_optimal'),
+            'test/frame_level_map': calc_frame_level_map(predictions, labels_json, 'test'),
         }
-        _add_raster_logs(logs, answers, labels_json, 'test', 'test', 'test_optimal', cfg['multilabel_threshold'])
+        _add_raster_logs(logs, predictions, labels_json, 'test', 'test', 'test_optimal', cfg['multilabel_threshold'])
         logger.info("%s", logs)
         wandb.log(logs)
 
@@ -262,7 +272,7 @@ def main(cfg):
             is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches')
         )
         out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{_str_now()}.json")
-        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth)
+        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth, smoothing_window=eval_smoothing)
        
 
 if __name__ == '__main__':

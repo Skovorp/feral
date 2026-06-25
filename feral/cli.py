@@ -206,7 +206,7 @@ def main():
     p_train.add_argument('--mode', choices=['lite', 'max', 'rare'], default=None,
                          help='Preset recipe overlay: '
                               'lite (smallest V-JEPA 2.1, full fine-tune, cheapest); '
-                              'max (largest runnable V-JEPA 2.1 + 75%% chunk overlap, best accuracy); '
+                              'max (default backbone, 66%% train / 80%% eval overlap + 9-frame smoothing + EMA, best accuracy); '
                               'rare (rare-class robustness: EMA & mixup off + grad-clip + class-weight cap)')
     p_train.add_argument('--resolution', type=int, default=None,
                          help='Square input resolution for training (e.g. 512). Overrides the '
@@ -242,7 +242,7 @@ def main():
     p_infer.add_argument('--compile', action='store_true', help='Compile model with torch.compile')
     p_infer.add_argument('--mode', choices=['lite', 'max'], default=None,
                          help='Inference overlap preset (model size is fixed by the checkpoint): '
-                              'lite (50%% chunk overlap, faster); max (75%% overlap, smoother labels, slower).')
+                              'lite (50%% chunk overlap, faster); max (80%% overlap + 9-frame smoothing, smoother labels, slower).')
     p_infer.add_argument('--resolution', type=int, default=None,
                          help='Override the square input resolution at inference (default: as trained, '
                               'read from the checkpoint).')

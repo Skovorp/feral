@@ -11,6 +11,8 @@ data:
   chunk_length: 64
   chunk_shift: 32
   chunk_step: 1
+  eval_chunk_shift: null   # stride between chunks for val/test/inference only (null = reuse chunk_shift). Lets eval/inference run a denser overlap than training, e.g. max preset trains at 66% but evaluates at 80%.
+  eval_smoothing_window: null   # N-frame moving average over the ensembled per-frame probabilities at val/test/inference (null or 1 = off). Applied per class and per video; windows never cross a video boundary.
   resize_to: 256
   resize_style: square
   do_aa: true

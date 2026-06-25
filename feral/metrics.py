@@ -16,17 +16,44 @@ from feral.dataset import get_frame_count
 
 logger = logging.getLogger(__name__)
 
-def calc_frame_level_map(ans, labels_json, partition):
-    """Ensemble per-frame predictions and return mean average precision over non-'other' classes."""
-    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
-    logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, logits)
+def smooth_per_frame_probs(arr, window):
+    """Centered moving average of a per-frame probability matrix over time.
+
+    ``arr`` has shape (T, C): T frames, C class channels. Each channel is
+    smoothed independently with a uniform window of ``window`` frames centered on
+    each frame. At the start/end of the video the window is truncated to the
+    frames that exist (true mean over the available frames) so the average never
+    crosses a video boundary. ``window`` of None, <=1, or >=T is a no-op (the
+    latter would just collapse every frame to the video-wide mean).
+    """
+    if window is None or window <= 1:
+        return arr
+    n = arr.shape[0]
+    if window >= n:
+        return arr
+    kernel = np.ones(window)
+    # Per-position count of real frames inside the (truncated) window, so edge
+    # frames divide by how many frames actually contributed, not by `window`.
+    counts = np.convolve(np.ones(n), kernel, mode='same')
+    out = np.empty_like(arr, dtype=float)
+    for c in range(arr.shape[1]):
+        out[:, c] = np.convolve(arr[:, c], kernel, mode='same') / counts
+    return out
+
+
+def calc_frame_level_map(predictions, labels_json, partition):
+    """Mean average precision over non-'other' classes from a per-frame prediction matrix.
+
+    ``predictions`` is the dict[filename -> (num_frames, num_classes) array] returned
+    by ``ensemble_predictions`` (optionally ``postprocess_predictions``-smoothed).
+    """
+    class_names = {int(k): v for k, v in labels_json['class_names'].items()}
 
     preds = []
     targets = []
     for fn in labels_json['splits'][partition]:
-        preds.append(logits[fn])
+        preds.append(predictions[fn])
         targets.append(labels_json['labels'][fn])
 
     preds = np.concatenate(preds, 0)
@@ -45,22 +72,20 @@ def calc_frame_level_map(ans, labels_json, partition):
         res[f'ap_{cls_name}'] = ap 
     return sum(aps) / len(aps)
 
-def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
+def calculate_f1_metrics(predictions, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
     """Compute precision/recall/F1/accuracy (plus per-class F1) for non-'other' classes.
 
     Single-label uses argmax with macro-averaging; multilabel thresholds logits at
     multilabel_threshold per class and averages. Returns a dict keyed by '{prefix}/...'.
+    ``predictions`` is the per-frame prediction matrix dict from ``ensemble_predictions``.
     """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [cls_ind for cls_ind, cls_name in class_names.items() if cls_name != 'other']
 
-    logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, logits)
-
     preds = []
     targets = []
     for fn in labels_json['splits'][partition]:
-        preds.append(logits[fn])
+        preds.append(predictions[fn])
         targets.append(labels_json['labels'][fn])
 
     preds = np.concatenate(preds, 0)
@@ -105,19 +130,17 @@ def calculate_f1_metrics(ans, labels_json, partition, is_multilabel, prefix, mul
         res[f'{prefix}/accuracy'] = accuracy_score(target_labels, pred_labels)
         return res
 
-def _per_class_optimal_picks(ans, labels_json, partition):
+def _per_class_optimal_picks(predictions, labels_json, partition):
     """
     Multilabel one-vs-rest sweep with precision_recall_curve. Returns
     dict[class_ind] = (best_f1, best_threshold) for non-'other' classes with at
     least one positive. Classes outside the dict are excluded (no positives).
+    ``predictions`` is the per-frame prediction matrix dict from ``ensemble_predictions``.
     """
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [i for i, n in class_names.items() if n != 'other']
 
-    logits = generate_empty_logits(labels_json, partition)
-    logits = ensemble_predictions(ans, logits)
-
-    preds = np.concatenate([logits[fn] for fn in labels_json['splits'][partition]], 0)
+    preds = np.concatenate([predictions[fn] for fn in labels_json['splits'][partition]], 0)
     targets = np.concatenate([labels_json['labels'][fn] for fn in labels_json['splits'][partition]], 0)
 
     out = {}
@@ -135,12 +158,12 @@ def _per_class_optimal_picks(ans, labels_json, partition):
     return out
 
 
-def compute_optimal_per_class_thresholds(ans, labels_json, partition):
+def compute_optimal_per_class_thresholds(predictions, labels_json, partition):
     """Per-class optimal-F1 thresholds keyed by class_ind. Empty if no valid classes."""
-    return {c: t for c, (_f, t) in _per_class_optimal_picks(ans, labels_json, partition).items()}
+    return {c: t for c, (_f, t) in _per_class_optimal_picks(predictions, labels_json, partition).items()}
 
 
-def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, prefix):
+def calculate_optimal_f1_metrics(predictions, labels_json, partition, is_multilabel, prefix):
     """Per-class optimal-threshold best-F1 metrics (multilabel only).
 
     Returns a dict with '{prefix}/best_f1_{name}' and '{prefix}/best_thr_{name}' per
@@ -154,7 +177,7 @@ def calculate_optimal_f1_metrics(ans, labels_json, partition, is_multilabel, pre
 
     class_names = {int(k): v for k, v in labels_json['class_names'].items()}
     valid_classes = [i for i, n in class_names.items() if n != 'other']
-    picks = _per_class_optimal_picks(ans, labels_json, partition)
+    picks = _per_class_optimal_picks(predictions, labels_json, partition)
 
     res = {}
     f1s = []
@@ -211,6 +234,22 @@ def ensemble_predictions(ans, logits):
                     logits[fn][i, :] = (logits[fn][left_ind[i], :] * inv_left_dist + logits[fn][right_ind[i], :] * inv_right_dist) / divisor
     return logits
 
+
+def postprocess_predictions(predictions, smoothing_window=None):
+    """Post-process an ensembled per-frame prediction matrix dict, in place.
+
+    ``predictions`` maps filename -> (num_frames, num_classes) array, as returned by
+    ``ensemble_predictions``. Currently the only post-processing step is an optional
+    per-class temporal moving average (``smoothing_window`` frames); the average is
+    taken independently per class and per video and never crosses a video boundary.
+    A ``smoothing_window`` of None or <= 1 leaves the matrix untouched. Returns the
+    (mutated) dict so callers can chain ``postprocess_predictions(ensemble_predictions(...))``.
+    """
+    if smoothing_window is not None and smoothing_window > 1:
+        for fn in predictions.keys():
+            predictions[fn] = smooth_per_frame_probs(predictions[fn], smoothing_window)
+    return predictions
+
 def generate_empty_logits(labels_json, partition):
     """Return dict[filename -> zeros array of shape (num_frames, num_classes)] for the partition."""
     logits = {}
@@ -218,14 +257,15 @@ def generate_empty_logits(labels_json, partition):
         logits[k] = np.zeros((len(labels_json['labels'][k]), len(labels_json['class_names'])))
     return logits
 
-def generate_raster_plot(ans, labels_json, partition):
+def generate_raster_plot(predictions, labels_json, partition):
     """Build a single-label ethogram raster (prediction, label, mismatch rows) across all
     videos in the partition, with per-video separators and a class legend. Returns a PIL
     image; on failure logs the traceback and returns an 'Error' image instead.
+
+    ``predictions`` is the per-frame prediction matrix dict from ``ensemble_predictions``.
     """
     try:
-        logits = generate_empty_logits(labels_json, partition)
-        logits = ensemble_predictions(ans, logits)
+        logits = predictions
         class_names = {int(k): v for k, v in labels_json['class_names'].items()}
         all_data = {fn: labels_json['labels'][fn] for fn in labels_json['splits'][partition]}
 
@@ -321,13 +361,14 @@ def generate_raster_plot(ans, labels_json, partition):
         return res
 
 
-def generate_multilabel_raster_plot(ans, labels_json, partition, thresholds):
+def generate_multilabel_raster_plot(predictions, labels_json, partition, thresholds):
     """
     Multilabel ethogram: two stacked rasters (prediction on top, ground truth on
     bottom), one row per class, cell colored when class is active. Black vlines
     separate videos with their names written below. Always returns a PIL image —
     on failure, an 'Error' image (logs traceback) so training never dies here.
 
+    ``predictions`` is the per-frame prediction matrix dict from ``ensemble_predictions``.
     thresholds: float OR dict[class_ind -> float]. Missing classes default to 0.5.
     """
     try:
@@ -341,8 +382,7 @@ def generate_multilabel_raster_plot(ans, labels_json, partition, thresholds):
         else:
             thr_arr = np.full(n_classes, float(thresholds))
 
-        logits = generate_empty_logits(labels_json, partition)
-        logits = ensemble_predictions(ans, logits)
+        logits = predictions
 
         video_names = list(logits.keys())
         preds_list, targets_list = [], []
@@ -530,25 +570,28 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
     out.release()
 
 
-def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn):
+def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn, smoothing_window=None):
     """Ensemble inference predictions (and EMA predictions if present) into per-frame logits
     and write them as JSON to save_fn under keys 'preds' and optionally 'ema_preds', each a
     dict[filename -> list-of-lists]. Frame counts are read from the videos under video_prefix.
+
+    ``smoothing_window`` (> 1) applies the same per-class moving average used at
+    eval/test time to the ensembled inference probabilities.
     """
     out = {}
-    
-    ans_logits = {} 
+
+    ans_logits = {}
     for fn in labels_json['splits']['inference']:
         ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
 
-    out['preds'] = ensemble_predictions(ans, ans_logits)
+    out['preds'] = postprocess_predictions(ensemble_predictions(ans, ans_logits), smoothing_window)
     out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
-    
+
     if len(ema_ans) > 0:
         ema_logits = {}
         for fn in labels_json['splits']['inference']:
             ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-        out['ema_preds'] = ensemble_predictions(ema_ans, ema_logits)
+        out['ema_preds'] = postprocess_predictions(ensemble_predictions(ema_ans, ema_logits), smoothing_window)
         out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
     with open(save_fn, 'w') as f:
         json.dump(out, f)

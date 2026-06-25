@@ -88,17 +88,33 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
 
     cfg['training']['compile'] = compile
 
+    # Inference uses the eval-time chunk overlap (eval_chunk_shift) and per-frame
+    # smoothing (eval_smoothing_window) the checkpoint was configured with, so a
+    # plain `feral infer` matches how the model is evaluated. Both fall back to
+    # "off" (chunk_shift / no smoothing) when the cfg doesn't define them.
+    eval_chunk_shift = cfg['data'].get('eval_chunk_shift')
+    if eval_chunk_shift is not None:
+        logger.info("eval_chunk_shift: chunk_shift %s -> %s (%.0f%% overlap)",
+                    cfg['data']['chunk_shift'], eval_chunk_shift,
+                    100 * (1 - eval_chunk_shift / cfg['data']['chunk_length']))
+        cfg['data']['chunk_shift'] = eval_chunk_shift
+    smoothing_window = cfg['data'].get('eval_smoothing_window')
+
     # Inference-time overrides. Backbone/model size is fixed by the checkpoint
-    # weights and is never changed here; only chunk overlap (stride) and input
-    # resolution can be safely overridden at predict time.
+    # weights and is never changed here; only chunk overlap (stride), per-frame
+    # smoothing, and input resolution can be safely overridden at predict time.
     if mode is not None:
-        from feral.presets import infer_chunk_shift
+        from feral.presets import infer_chunk_shift, infer_smoothing_window
         new_shift = infer_chunk_shift(mode, cfg['data']['chunk_length'])
         if new_shift is not None:
             logger.info("--mode %s: chunk_shift %s -> %s (%.0f%% overlap)",
                         mode, cfg['data']['chunk_shift'], new_shift,
                         100 * (1 - new_shift / cfg['data']['chunk_length']))
             cfg['data']['chunk_shift'] = new_shift
+        new_smoothing = infer_smoothing_window(mode)
+        logger.info("--mode %s: eval_smoothing_window %s -> %s",
+                    mode, smoothing_window, new_smoothing)
+        smoothing_window = new_smoothing
     if resolution is not None:
         logger.info("--resolution %s: resize_to %s -> %s",
                     resolution, cfg['data']['resize_to'], resolution)
@@ -154,7 +170,7 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
         output = f"inference_{folder_name}.json"
 
     os.makedirs(os.path.dirname(output) or '.', exist_ok=True)
-    save_inference_results(answers, [], video_folder, labels_json, output)
+    save_inference_results(answers, [], video_folder, labels_json, output, smoothing_window=smoothing_window)
     logger.info("Results saved to %s", output)
 
 

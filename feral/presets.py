@@ -13,9 +13,12 @@ Modes
 -----
 lite : smallest V-JEPA 2.1 (ViT-B/384), full fine-tune with 50% chunk overlap.
        Cheapest to train and run.
-max  : same backbone as ``default`` (no override), but bumps the temporal
-       overlap to 66% (``chunk_shift`` 21) and keeps EMA on. This is the recipe
-       that, in our comparison experiments, achieves SOTA on CalMS21.
+max  : same backbone as ``default`` (no override). Trains at 66% temporal
+       overlap (``chunk_shift`` 21) but evaluates/infers at a denser 80% overlap
+       (``eval_chunk_shift`` 12) plus a 9-frame moving average over the
+       ensembled per-frame probabilities (``eval_smoothing_window`` 9), and keeps
+       EMA on. This is the recipe that, in our comparison experiments, achieves
+       SOTA on CalMS21.
 rare : tuned for rare-class / rare-positive datasets — turns mixup and label
        smoothing OFF (both hurt when positives are scarce) and turns ON the
        stabilization knobs (grad-norm clip + class-weight cap). Built on the
@@ -36,10 +39,12 @@ PRESETS = {
         # 256 via interpolated position embeddings; ~2.25x fewer tokens.
     },
 
-    # ── max ── default backbone + 66% overlap + EMA ─────────────────────────
+    # ── max ── default backbone + 66% train / 80% eval overlap + smoothing + EMA ──
     "max": {
         "data": {
-            "chunk_shift": 21,             # 66% overlap = chunk_length / 3 (default is 50%); SOTA on CalMS21
+            "chunk_shift": 21,             # 66% TRAIN overlap = chunk_length / 3 (default is 50%); SOTA on CalMS21
+            "eval_chunk_shift": 12,        # 80% EVAL/TEST/INFERENCE overlap = chunk_length / 5 (denser than training -> smoother labels)
+            "eval_smoothing_window": 9,    # 9-frame per-class moving average over ensembled probs at eval/test/inference
         },
         "ema_decay": 0.999,                # EMA ON (default disables it; max re-enables)
         # backbone, freeze_encoder_layers, resize_to all inherit default_config.
@@ -64,7 +69,7 @@ PRESETS = {
 # One-line descriptions for CLI --help / logging.
 MODE_HELP = {
     "lite": "smallest V-JEPA 2.1 (ViT-B/384), full fine-tune (cheapest)",
-    "max":  "default backbone + 66% chunk overlap + EMA on (SOTA on CalMS21)",
+    "max":  "default backbone + 66% train / 80% eval overlap + 9-frame smoothing + EMA on (SOTA on CalMS21)",
     "rare": "rare-class robustness: EMA, mixup & label smoothing off + grad-clip + class-weight cap",
 }
 
@@ -96,11 +101,23 @@ def apply_mode(cfg, mode):
 def infer_chunk_shift(mode, chunk_length):
     """Chunk shift (stride) for inference-time overlap under a given mode.
 
-    lite -> 50% overlap (chunk_length / 2); max -> 66% overlap (chunk_length / 3).
-    Returns None for modes that don't change inference chunking (e.g. ``rare``).
+    lite -> 50% overlap (chunk_length / 2); max -> 80% overlap (chunk_length / 5),
+    matching ``max``'s ``eval_chunk_shift``. Returns None for modes that don't
+    change inference chunking (e.g. ``rare``).
     """
     if mode == "lite":
         return max(1, chunk_length // 2)
     if mode == "max":
-        return max(1, chunk_length // 3)
+        return max(1, chunk_length // 5)
+    return None
+
+
+def infer_smoothing_window(mode):
+    """Per-frame smoothing window for inference-time overlap under a given mode.
+
+    ``max`` smooths the ensembled per-frame probabilities with a 9-frame moving
+    average; every other mode returns None (no smoothing).
+    """
+    if mode == "max":
+        return 9
     return None

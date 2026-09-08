@@ -338,3 +338,18 @@ class TestGenerateEmptyLogits:
         logits = generate_empty_logits(labels_json, "val")
         assert logits["vid.mp4"].shape == (7, 4)
         np.testing.assert_array_equal(logits["vid.mp4"], 0.0)
+
+
+@pytest.mark.parametrize('counts', [(1, 2), (3, 2)])
+def test_interpolation_uses_averaged_neighbors(counts):
+    ans = ([(("a.mp4", 1, i), [0.2, 0.8]) for i in range(counts[0])]
+           + [(("a.mp4", 3, i), [0.6, 0.4]) for i in range(counts[1])])
+    result = ensemble_predictions(ans, {"a.mp4": np.zeros((5, 2))})
+    np.testing.assert_allclose(result['a.mp4'],
+                               [[0.2, 0.8], [0.2, 0.8], [0.4, 0.6], [0.6, 0.4], [0.6, 0.4]])
+
+
+@pytest.mark.parametrize('ans', [[], [(("b.mp4", 0, 0), [0.2, 0.8])]])
+def test_video_without_predictions_is_explicit_error(ans):
+    with pytest.raises(ValueError, match="No predictions for video 'a.mp4'"):
+        ensemble_predictions(ans, {"a.mp4": np.zeros((2, 2)), "b.mp4": np.zeros((1, 2))})

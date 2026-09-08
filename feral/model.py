@@ -34,14 +34,14 @@ class AttentionPoolingBlockCustom(nn.Module):
 
 class FeralModel(nn.Module):
     def __init__(self,
-            backbone,
-            num_classes,
-            predict_per_item,
-            fc_drop_rate,
-            freeze_encoder_layers=0,
-            pretrained=True,
-            gradient_checkpointing=False,
-            **kwargs):
+            backbone: str,
+            num_classes: int,
+            predict_per_item: int,
+            fc_drop_rate: float,
+            freeze_encoder_layers: int = 0,
+            pretrained: bool = True,
+            gradient_checkpointing: bool = False,
+            **kwargs) -> None:
         """Assemble the model: a backbone encoder, an attention-pooling projector (out_tokens =
         predict_per_item), batch-norm, dropout, and a linear classification head. Freezes the first
         freeze_encoder_layers backbone layers."""
@@ -57,7 +57,7 @@ class FeralModel(nn.Module):
         self.head = nn.Linear(d, num_classes)
         self.backbone.freeze_encoder(freeze_encoder_layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run input through backbone, attention pooling, norm/dropout, and head; returns class
         logits of shape (B * predict_per_item, num_classes)."""
         x = self.backbone(x)

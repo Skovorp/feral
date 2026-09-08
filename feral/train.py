@@ -65,7 +65,7 @@ def _add_raster_logs(logs, predictions, labels_json, partition, prefix, optimal_
     except Exception:
         logger.exception("optimal raster plot failed for %s", optimal_prefix)
 
-def main(cfg):
+def _run(cfg):
     """Run the full training/eval/inference pipeline for one config: build data, model,
     and training objects, train with per-epoch validation and best-checkpoint selection
     (with optional EMA and early stopping), then load the best checkpoint to run test
@@ -73,10 +73,13 @@ def main(cfg):
     to disk. Returns None."""
     check_environment(compile_enabled=cfg['training']['compile'])
 
-    with open(cfg['data']['label_json'], 'r') as f:
-        labels_json = json.load(f)
+    with open(cfg['data']['label_json'], 'rb') as f:
+        label_bytes = f.read()
+    labels_json = json.loads(label_bytes)
 
     validate_labels_json(labels_json, cfg['data'].get('prefix'))
+    from feral.run_status import label_fingerprints
+    cfg.update(label_fingerprints(label_bytes, labels_json))
 
     class_names = {int(x): y for x, y in labels_json['class_names'].items()}
     num_classes = len(class_names)
@@ -90,8 +93,10 @@ def main(cfg):
         'cfg': cfg,
     }
 
-    os.makedirs("answers", exist_ok=True)
-    os.makedirs("checkpoints", exist_ok=True)
+    answers_dir = os.path.join(cfg.get("output_dir", "."), "answers")
+    checkpoints_dir = os.path.join(cfg.get("output_dir", "."), "checkpoints")
+    os.makedirs(answers_dir, exist_ok=True)
+    os.makedirs(checkpoints_dir, exist_ok=True)
 
     torch.manual_seed(cfg['seed'])
     np.random.seed(cfg['seed'])
@@ -123,7 +128,7 @@ def main(cfg):
             cfg, model, train_dataset, train_loader, labels_json, device,
         )
 
-        best_checkpoint_path = os.path.join("checkpoints", f"{cfg['run_name']}_best_checkpoint.pt")
+        best_checkpoint_path = os.path.join(checkpoints_dir, f"{cfg['run_name']}_best_checkpoint.pt")
         best_map = -1
         epochs_without_updates = 0
 
@@ -133,7 +138,8 @@ def main(cfg):
                 mixup=mixup, model_ema=model_ema,
                 num_classes=num_classes, is_multilabel=labels_json['is_multilabel'],
                 predict_per_item=cfg['predict_per_item'],
-                device=device, log_fn=wandb.log, max_batches=cfg.get('max_batches'),
+                device=device, log_fn=wandb.log,
+                max_batches=cfg.get('max_train_batches', cfg.get('max_batches')),
                 grad_clip_norm=cfg['training'].get('grad_clip_norm'),
                 log_grad_norm=cfg['training'].get('log_grad_norm', True),
                 heavy_log_every=cfg['training'].get('heavy_log_every'),
@@ -164,7 +170,7 @@ def main(cfg):
                     num_classes=num_classes, is_multilabel=labels_json['is_multilabel'],
                     device=device, max_batches=cfg.get('max_batches'),
                 )
-            with open(os.path.join("answers", f"{cfg['run_name']}_{_str_now()}.json"), 'w') as f:
+            with open(os.path.join(answers_dir, f"{cfg['run_name']}_{_str_now()}.json"), 'w') as f:
                 json.dump(answers, f)
             # Ensemble + smooth the per-frame predictions once, then feed every metric.
             val_preds = postprocess_predictions(
@@ -238,11 +244,11 @@ def main(cfg):
             num_classes=num_classes, is_multilabel=labels_json['is_multilabel'],
             device=device, max_batches=cfg.get('max_batches')
         )
-        with open(os.path.join("answers", f"{cfg['run_name']}_raw_test.json"), 'w') as f:
+        with open(os.path.join(answers_dir, f"{cfg['run_name']}_raw_test.json"), 'w') as f:
             json.dump(answers, f)
         predictions = postprocess_predictions(
             ensemble_predictions(answers, generate_empty_logits(labels_json, 'test')), eval_smoothing)
-        with open(os.path.join("answers", f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
+        with open(os.path.join(answers_dir, f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
             if labels_json['is_multilabel']:
                 json.dump({
                     'pred': {x: ((y > cfg['multilabel_threshold']) * 1).tolist() for x, y in predictions.items()},
@@ -271,9 +277,17 @@ def main(cfg):
             best_model, inference_loader,
             is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches')
         )
-        out_pth = os.path.join("answers", f"_inference_{cfg['run_name']}_{_str_now()}.json")
+        out_pth = os.path.join(answers_dir, f"_inference_{cfg['run_name']}_{_str_now()}.json")
         save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth, smoothing_window=eval_smoothing)
        
+
+def main(cfg: dict) -> None:
+    """Run training, optionally recording lifecycle in output_dir/run.json."""
+    from feral.run_status import training_status, normalize_config_paths
+    cfg = normalize_config_paths(cfg)
+    with training_status(cfg):
+        _run(cfg)
+
 
 if __name__ == '__main__':
     from feral.cli import main as cli_main

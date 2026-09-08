@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import random
 import os
+from typing import Any
 
 @torch.no_grad()
 def prep_for_answers(outputs, targets, names=None):
@@ -272,10 +273,12 @@ def pick_and_save_best(model, model_ema, val_map, ema_map, best_map, path, metad
         return ema_map, 'ema'
     return best_map, None
 
-def validate_labels_json(labels_json, video_folder):
+def validate_labels_json(labels_json: dict[str, Any], video_folder: str | os.PathLike | None) -> None:
     """Validate the label JSON up-front so users get clear errors instead of
     cryptic crashes deep in training."""
     errors = []
+    if not isinstance(labels_json, dict):
+        raise ValueError("Label JSON must be an object")
 
     # --- top-level keys ---
     required_keys = {'class_names', 'is_multilabel', 'labels', 'splits'}
@@ -293,6 +296,8 @@ def validate_labels_json(labels_json, video_folder):
         errors.append("'class_names' must be a non-empty dict")
     else:
         try:
+            if any(not isinstance(k, str) or str(int(k)) != k for k in class_names_raw):
+                raise ValueError
             ids = sorted(int(k) for k in class_names_raw.keys())
         except (ValueError, TypeError):
             errors.append(f"'class_names' keys must be integer strings, got: {list(class_names_raw.keys())}")
@@ -305,6 +310,11 @@ def validate_labels_json(labels_json, video_folder):
                     f"Expected {expected}, got {ids}"
                 )
 
+    if isinstance(class_names_raw, dict) and any(
+        not isinstance(v, str) or not v.strip() for v in class_names_raw.values()
+    ):
+        errors.append("class_names values must be non-empty strings")
+
     num_classes = len(class_names_raw) if isinstance(class_names_raw, dict) else 0
     is_multilabel = labels_json['is_multilabel']
     if not isinstance(is_multilabel, bool):
@@ -314,6 +324,7 @@ def validate_labels_json(labels_json, video_folder):
     labels = labels_json.get('labels', {})
     if not isinstance(labels, dict):
         errors.append("'labels' must be a dict mapping video filenames to frame labels")
+        labels = {}
     elif num_classes > 0 and is_multilabel is not None:
         for vid, frame_labels in labels.items():
             if not isinstance(frame_labels, list) or len(frame_labels) == 0:
@@ -329,8 +340,10 @@ def validate_labels_json(labels_json, video_folder):
                         f"'{vid}': multilabel frames must each have {num_classes} values. "
                         f"Bad frames (first 5): {bad_width[:5]}"
                     )
+                elif any(type(v) not in (int, float) or v not in (0, 1) for fl in frame_labels for v in fl):
+                    errors.append(f"'{vid}': multilabel values must be binary (0 or 1)")
             else:
-                bad_vals = sorted({v for v in frame_labels if not isinstance(v, int) or v < 0 or v >= num_classes})
+                bad_vals = [v for v in frame_labels if type(v) is not int or v < 0 or v >= num_classes][:5]
                 if bad_vals:
                     errors.append(
                         f"'{vid}': single-label IDs must be ints in [0, {num_classes}). "
@@ -339,7 +352,11 @@ def validate_labels_json(labels_json, video_folder):
 
     # --- splits ---
     splits = labels_json.get('splits', {})
+    if not isinstance(splits, dict):
+        errors.append("'splits' must be a dict")
+        splits = {}
     valid_partitions = {'train', 'val', 'test', 'inference'}
+    assigned = {}
     unknown = set(splits.keys()) - valid_partitions
     if unknown:
         errors.append(f"Unknown split names: {unknown}. Allowed: {valid_partitions}")
@@ -348,12 +365,23 @@ def validate_labels_json(labels_json, video_folder):
         if not isinstance(videos, list):
             errors.append(f"Split '{partition}' must be a list, got {type(videos).__name__}")
             continue
+        seen = set()
         for vid in videos:
+            if not isinstance(vid, str) or not vid:
+                errors.append(f"Split '{partition}' filenames must be non-empty strings")
+                continue
+            if vid in seen:
+                errors.append(f"Split '{partition}' contains duplicate video '{vid}'")
+            seen.add(vid)
+            if partition in {'train', 'val', 'test'}:
+                if vid in assigned and assigned[vid] != partition:
+                    errors.append(f"Video '{vid}' overlaps splits '{assigned[vid]}' and '{partition}'")
+                assigned[vid] = partition
             if vid not in labels and partition != 'inference':
                 errors.append(f"Split '{partition}' references '{vid}' which has no entry in 'labels'")
 
     # --- frame count vs. video files ---
-    if video_folder:
+    if video_folder and not errors:
         import cv2
         frame_mismatches = []
         for partition, videos in splits.items():
@@ -362,13 +390,18 @@ def validate_labels_json(labels_json, video_folder):
                 if not os.path.isfile(vid_path):
                     errors.append(f"Split '{partition}' references '{vid}' but file not found: {vid_path}")
                     continue
-                if vid not in labels:
-                    continue
                 cap = cv2.VideoCapture(vid_path)
                 try:
-                    video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    readable, _ = cap.read() if cap.isOpened() else (False, None)
+                    if not readable or not np.isfinite(frame_count) or frame_count <= 0:
+                        errors.append(f"Video '{vid}' cannot be decoded or has no frames")
+                        continue
+                    video_frames = int(frame_count)
                 finally:
                     cap.release()
+                if vid not in labels:
+                    continue
                 json_frames = len(labels[vid])
                 if video_frames != json_frames:
                     frame_mismatches.append(

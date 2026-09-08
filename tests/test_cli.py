@@ -465,3 +465,20 @@ class TestCmdReencode:
         with pytest.raises(SystemExit) as exc:
             cli._cmd_reencode(self._args(in_dir, out_dir))
         assert exc.value.code == 1
+
+
+def test_train_output_dir_flag(monkeypatch, dispatch, tmp_path):
+    labels = tmp_path / 'labels.json'
+    labels.write_text('{}')
+    _run_main(monkeypatch, ['train', str(tmp_path), str(labels),
+                           '--output-dir', str(tmp_path / 'run'), '--no-wandb'])
+    assert dispatch['args'].output_dir == str(tmp_path / 'run')
+
+
+def test_conflicting_wandb_flags_rejected(monkeypatch, dispatch, tmp_path):
+    labels = tmp_path / 'labels.json'
+    labels.write_text('{}')
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, ['train', str(tmp_path), str(labels), '--no-wandb', '--public-wandb'])
+    assert exc.value.code == 2
+    assert dispatch == {}

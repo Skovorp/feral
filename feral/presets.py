@@ -89,7 +89,7 @@ def _deep_merge(base, overlay):
     return out
 
 
-def apply_mode(cfg, mode):
+def apply_mode(cfg: dict, mode: str | None) -> dict:
     """Return ``cfg`` deep-merged with preset ``mode``. Unknown mode -> ValueError."""
     if mode is None:
         return cfg
@@ -98,7 +98,7 @@ def apply_mode(cfg, mode):
     return _deep_merge(cfg, PRESETS[mode])
 
 
-def infer_chunk_shift(mode, chunk_length):
+def infer_chunk_shift(mode: str | None, chunk_length: int) -> int | None:
     """Chunk shift (stride) for inference-time overlap under a given mode.
 
     lite -> 50% overlap (chunk_length / 2); max -> 80% overlap (chunk_length / 5),
@@ -112,7 +112,7 @@ def infer_chunk_shift(mode, chunk_length):
     return None
 
 
-def infer_smoothing_window(mode):
+def infer_smoothing_window(mode: str | None) -> int | None:
     """Per-frame smoothing window for inference-time overlap under a given mode.
 
     ``max`` smooths the ensembled per-frame probabilities with a 9-frame moving

@@ -10,6 +10,8 @@ like torch are only imported when you touch a symbol that needs them)::
     from feral import BACKBONES, FeralModel, ClsDataset, validate_labels_json
 """
 
+from typing import Any
+
 from importlib.metadata import PackageNotFoundError, version
 
 try:
@@ -19,6 +21,7 @@ except PackageNotFoundError:  # running from a source checkout that isn't instal
 
 __all__ = [
     "__version__",
+    "load_default_config",
     "run_training",
     "run_inference_folder",
     "apply_mode",
@@ -44,7 +47,15 @@ _LAZY = {
 }
 
 
-def __getattr__(name):
+def load_default_config() -> dict[str, Any]:
+    """Return a fresh copy of the packaged training defaults."""
+    from importlib.resources import files
+    import yaml
+
+    return yaml.safe_load(files("feral").joinpath("default_config.yaml").read_text())
+
+
+def __getattr__(name: str) -> Any:
     """Lazily import and return a public symbol listed in ``_LAZY``; raise AttributeError otherwise."""
     if name in _LAZY:
         import importlib
@@ -53,6 +64,6 @@ def __getattr__(name):
     raise AttributeError(f"module 'feral' has no attribute {name!r}")
 
 
-def __dir__():
+def __dir__() -> list[str]:
     """Return the sorted public names (``__all__``) for tab-completion and ``dir(feral)``."""
     return sorted(__all__)

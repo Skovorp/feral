@@ -1,7 +1,7 @@
 torch>=2.5.0
 pandas==2.3.3
 scikit-learn==1.7.2
-decord==0.6.0; sys_platform == 'linux'
+decord==0.6.0; sys_platform == 'linux' or sys_platform == 'win32'
 eva-decord==0.6.0; sys_platform == 'darwin'
 triton-windows>=3.0; sys_platform == 'win32'
 transformers==5.5.3

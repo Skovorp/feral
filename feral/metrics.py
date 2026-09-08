@@ -17,7 +17,7 @@ from feral.dataset import get_frame_count
 logger = logging.getLogger(__name__)
 
 
-def smooth_per_frame_probs(arr, window):
+def smooth_per_frame_probs(arr: np.ndarray, window: int | None) -> np.ndarray:
     """Centered moving average of a per-frame probability matrix over time.
 
     ``arr`` has shape (T, C): T frames, C class channels. Each channel is
@@ -42,7 +42,8 @@ def smooth_per_frame_probs(arr, window):
     return out
 
 
-def calc_frame_level_map(predictions, labels_json, partition):
+def calc_frame_level_map(predictions: dict[str, np.ndarray], labels_json: dict,
+                         partition: str) -> float:
     """Mean average precision over non-'other' classes from a per-frame prediction matrix.
 
     ``predictions`` is the dict[filename -> (num_frames, num_classes) array] returned
@@ -72,7 +73,9 @@ def calc_frame_level_map(predictions, labels_json, partition):
         res[f'ap_{cls_name}'] = ap 
     return sum(aps) / len(aps)
 
-def calculate_f1_metrics(predictions, labels_json, partition, is_multilabel, prefix, multilabel_threshold):
+def calculate_f1_metrics(predictions: dict[str, np.ndarray], labels_json: dict,
+                         partition: str, is_multilabel: bool, prefix: str,
+                         multilabel_threshold: float) -> dict[str, float]:
     """Compute precision/recall/F1/accuracy (plus per-class F1) for non-'other' classes.
 
     Single-label uses argmax with macro-averaging; multilabel thresholds logits at
@@ -158,12 +161,16 @@ def _per_class_optimal_picks(predictions, labels_json, partition):
     return out
 
 
-def compute_optimal_per_class_thresholds(predictions, labels_json, partition):
+def compute_optimal_per_class_thresholds(
+    predictions: dict[str, np.ndarray], labels_json: dict, partition: str,
+) -> dict[int, float]:
     """Per-class optimal-F1 thresholds keyed by class_ind. Empty if no valid classes."""
     return {c: t for c, (_f, t) in _per_class_optimal_picks(predictions, labels_json, partition).items()}
 
 
-def calculate_optimal_f1_metrics(predictions, labels_json, partition, is_multilabel, prefix):
+def calculate_optimal_f1_metrics(predictions: dict[str, np.ndarray], labels_json: dict,
+                                 partition: str, is_multilabel: bool,
+                                 prefix: str) -> dict[str, float]:
     """Per-class optimal-threshold best-F1 metrics (multilabel only).
 
     Returns a dict with '{prefix}/best_f1_{name}' and '{prefix}/best_thr_{name}' per
@@ -195,31 +202,36 @@ def calculate_optimal_f1_metrics(predictions, labels_json, partition, is_multila
     return res
 
 
-def ensemble_predictions(ans, logits):
+def ensemble_predictions(
+    ans: list[tuple[tuple[str, int, int], list[float]]],
+    logits: dict[str, np.ndarray],
+) -> dict[str, np.ndarray]:
     """Accumulate per-chunk predictions into per-frame logits (uniform weights), averaging
     overlapping predictions and filling gaps by inverse-distance interpolation from the
-    nearest predicted frames on either side. Mutates and returns `logits`.
+    nearest predicted frames on either side. Raises ValueError if a requested video
+    has no predictions. Mutates and returns `logits`.
     """
-    predict_per_item = max(x[0][2] for x in ans) + 1
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
-
-    # uniform weights for now
-    weights = np.ones(predict_per_item)[:, None]
 
     for el in ans:
         fn, global_ind, chunk_ind = el[0]
         preds = np.array(el[1])
 
-        logits[fn][global_ind, :] += preds * weights[chunk_ind, 0]
-        sum_weights[fn][global_ind] += weights[chunk_ind, 0]
+        logits[fn][global_ind, :] += preds
+        sum_weights[fn][global_ind] += 1
     
     for fn in logits.keys():
+        covered = sum_weights[fn] > 0
+        if not covered.any():
+            raise ValueError(f"No predictions for video {fn!r}")
+        # Normalize both neighbors before interpolating any missing frame.
+        logits[fn][covered] /= sum_weights[fn][covered, None]
         left_ind = last_nonzero_index(sum_weights[fn])
         right_ind = next_nonzero_index(sum_weights[fn])
 
         for i in range(sum_weights[fn].shape[0]):
             if sum_weights[fn][i] > 0:
-                logits[fn][i, :] = logits[fn][i, :] / sum_weights[fn][i]
+                continue
             else:
                 if left_ind[i] == -1 and right_ind[i] == -1:
                     continue
@@ -235,7 +247,8 @@ def ensemble_predictions(ans, logits):
     return logits
 
 
-def postprocess_predictions(predictions, smoothing_window=None):
+def postprocess_predictions(predictions: dict[str, np.ndarray],
+                            smoothing_window: int | None = None) -> dict[str, np.ndarray]:
     """Post-process an ensembled per-frame prediction matrix dict, in place.
 
     ``predictions`` maps filename -> (num_frames, num_classes) array, as returned by
@@ -250,7 +263,7 @@ def postprocess_predictions(predictions, smoothing_window=None):
             predictions[fn] = smooth_per_frame_probs(predictions[fn], smoothing_window)
     return predictions
 
-def generate_empty_logits(labels_json, partition):
+def generate_empty_logits(labels_json: dict, partition: str) -> dict[str, np.ndarray]:
     """Return dict[filename -> zeros array of shape (num_frames, num_classes)] for the partition."""
     logits = {}
     for k in labels_json['splits'][partition]:

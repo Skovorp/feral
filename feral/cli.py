@@ -32,6 +32,8 @@ def _cmd_train(args):
     cfg['data']['prefix'] = args.video_folder
     cfg['data']['label_json'] = args.label_json_path
     cfg['run_name'] = get_random_run_name()
+    if getattr(args, 'output_dir', None):
+        cfg['output_dir'] = os.path.abspath(args.output_dir)
 
     if args.resolution is not None:
         cfg['data']['resize_to'] = args.resolution
@@ -192,6 +194,29 @@ def _cmd_reencode(args):
         print(f"Converted videos are in: {args.output_dir}")
 
 
+def _emit_diagnostic(report, as_json):
+    import json
+    print(json.dumps(report, sort_keys=True, indent=None if as_json else 2))
+    if not report['ok']:
+        raise SystemExit(1)
+
+
+def _cmd_doctor(args):
+    from contextlib import redirect_stdout
+    from feral.diagnostics import doctor
+    with redirect_stdout(sys.stderr):
+        report = doctor()
+    _emit_diagnostic(report, args.json)
+
+
+def _cmd_validate(args):
+    from contextlib import redirect_stdout
+    from feral.diagnostics import validate_dataset
+    with redirect_stdout(sys.stderr):
+        report = validate_dataset(args.video_folder, args.label_json_path)
+    _emit_diagnostic(report, args.json)
+
+
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
 def main():
@@ -199,10 +224,19 @@ def main():
     parser = argparse.ArgumentParser(prog='feral', description='FERAL: Feature Extraction for Recognition of Animal Locomotion')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
+    for command, handler, help_text in [('doctor', _cmd_doctor, 'Check local dependencies and CUDA'), ('validate', _cmd_validate, 'Validate labels and video frame counts')]:
+        diagnostic = subparsers.add_parser(command, help=help_text)
+        diagnostic.add_argument('--json', action='store_true', help='Emit one JSON object; exit 0 on success, 1 on failed checks')
+        if command == 'validate':
+            diagnostic.add_argument('video_folder')
+            diagnostic.add_argument('label_json_path')
+        diagnostic.set_defaults(func=handler)
+
     # feral train
     p_train = subparsers.add_parser('train', help='Run interactive training pipeline')
     p_train.add_argument('video_folder', help='Path to the folder containing training videos')
     p_train.add_argument('label_json_path', help='Path to the label JSON file')
+    p_train.add_argument('--output-dir', help='Write answers/, checkpoints/, and run.json here; use a fresh directory for each run')
     p_train.add_argument('--mode', choices=['lite', 'max', 'rare'], default=None,
                          help='Preset recipe overlay: '
                               'lite (smallest V-JEPA 2.1, full fine-tune, cheapest); '
@@ -264,6 +298,8 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'train':
+        if args.no_wandb and args.public_wandb:
+            parser.error('--no-wandb and --public-wandb are mutually exclusive')
         if not os.path.isdir(args.video_folder):
             parser.error(f"Video folder is not a directory: {args.video_folder}")
         if not os.path.isfile(args.label_json_path):

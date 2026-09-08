@@ -1,0 +1,31 @@
+name: CPU tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+      - run: pip wheel --no-deps . --wheel-dir "${RUNNER_TEMP}/feral-wheel"
+      - run: pip install "${RUNNER_TEMP}"/feral-wheel/feral-*.whl pytest
+      - name: Check installed wheel outside checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import feral
+          assert not Path(feral.__file__).resolve().is_relative_to(Path(os.environ["GITHUB_WORKSPACE"]).resolve())
+          cfg = feral.load_default_config()
+          assert {"data", "model", "training"} <= cfg.keys()
+          PYTHON
+          feral --help
+      - name: Run CPU suite (no model downloads or GPU training)
+        run: python -m pytest tests --ignore=tests/test_backbones.py --ignore=tests/test_smoke.py --ignore=tests/test_inference_folder.py

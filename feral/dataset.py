@@ -14,7 +14,8 @@ from feral.utils import get_class_frequencies
 
 logger = logging.getLogger(__name__)
 
-def read_range_video_decord(path, frames, width=-1, height=-1):
+def read_range_video_decord(path: str, frames: list[int], width: int = -1,
+                            height: int = -1) -> torch.Tensor:
     """Decode the given ``frames`` indices from a video, resizing at decode time.
 
     Returns a uint8 tensor of shape (T, C, H, W).
@@ -24,7 +25,8 @@ def read_range_video_decord(path, frames, width=-1, height=-1):
     return torch.from_numpy(video).permute(0, 3, 1, 2)
 
 
-def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
+def compute_decode_size(orig_w: int, orig_h: int, resize_to: int,
+                        resize_style: str) -> tuple[int, int]:
     """Target (width, height) for decord decode-time resize, matching
     torchvision `build_resize_transform` output size."""
     if resize_style == "square":
@@ -36,7 +38,8 @@ def compute_decode_size(orig_w, orig_h, resize_to, resize_style):
         return resize_to, round(orig_h * resize_to / orig_w)
     raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
-def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
+def get_frame_ids(total_frames: int, chunk_shift: int, chunk_length: int,
+                  chunk_step: int) -> list[list[int]]:
         """Split a video of ``total_frames`` into overlapping fixed-size chunks.
 
         Returns a list of chunks, each a list of ``chunk_length`` frame indices.
@@ -66,7 +69,7 @@ def get_frame_ids(total_frames, chunk_shift, chunk_length, chunk_step):
             start_ind = inds[0] + chunk_shift
         return vid_frames
 
-def build_resize_transform(resize_to, resize_style):
+def build_resize_transform(resize_to: int, resize_style: str) -> torchvision.transforms.v2.Resize:
     """Construct the torchvision Resize transform for a given `resize_style`.
 
     - "square":    squish videos to ``(resize_to, resize_to)`` regardless of input aspect ratio.
@@ -79,7 +82,7 @@ def build_resize_transform(resize_to, resize_style):
     raise ValueError(f"resize_style must be 'square' or 'rectangle', got {resize_style!r}")
 
 
-def get_frame_count(path: str):
+def get_frame_count(path: str) -> int | None:
     """Return the video's frame count via OpenCV, or None if it can't be read."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Video not found: {path}")
@@ -91,7 +94,7 @@ def get_frame_count(path: str):
         cap.release()
 
 
-def get_video_dims(path: str):
+def get_video_dims(path: str) -> tuple[int, int]:
     """Return the video's ``(width, height)`` in pixels via OpenCV."""
     cap = cv2.VideoCapture(path)
     try:
@@ -100,10 +103,11 @@ def get_video_dims(path: str):
         cap.release()
 
 class ClsDataset():
-    def __init__(self, partition, label_json_dict, do_aa, predict_per_item,
-                 num_classes, prefix, resize_to, chunk_shift, chunk_length,
-                 chunk_step, resize_style="square", part_sample=1.0,
-                 subsample_keep_rare_threshold=None, **kwargs):
+    def __init__(self, partition: str, label_json_dict: dict, do_aa: bool,
+                 predict_per_item: int, num_classes: int, prefix: str,
+                 resize_to: int, chunk_shift: int, chunk_length: int,
+                 chunk_step: int, resize_style: str = "square", part_sample: float = 1.0,
+                 subsample_keep_rare_threshold: float | None = None, **kwargs) -> None:
         """Build the chunk samples/labels for a partition and set up transforms.
 
         Parses the label JSON into ``(filename, frame_ids)`` chunks, configures
@@ -190,6 +194,8 @@ class ClsDataset():
         for fn in self.json_data['splits'][self.partition]:
             pth = os.path.join(self.prefix, fn)
             video_total_frames = get_frame_count(pth)
+            if video_total_frames is None or video_total_frames <= 0:
+                raise ValueError(f"Cannot read frames from video {pth!r}")
             if self.decode_size is None:
                 orig_w, orig_h = get_video_dims(pth)
                 self.decode_size = compute_decode_size(orig_w, orig_h, self.resize_to, self.resize_style)
@@ -197,6 +203,11 @@ class ClsDataset():
                 json_total_frames = len(self.json_data['labels'][fn])
                 assert json_total_frames == video_total_frames, f"Bad json for video {fn}. Video has {video_total_frames} frames, labels have {json_total_frames} frames"
             frame_ids = get_frame_ids(video_total_frames, chunk_shift, chunk_length, chunk_step)
+            if not frame_ids and self.partition == 'inference':
+                # Preserve the model window without inventing output frame indices.
+                # Training and evaluation retain their existing chunk protocol.
+                frame_ids = [[min(i * chunk_step, video_total_frames - 1)
+                              for i in range(chunk_length)]]
             for frames in frame_ids:
                 self.samples.append((fn, frames))
                 if self.partition != 'inference':
@@ -204,6 +215,9 @@ class ClsDataset():
                         [self.json_data['labels'][fn][i] for i in frames]
                     )
         if self.partition != 'inference':
+            if not self.samples:
+                raise ValueError(f"No full video chunks in {self.partition!r}; videos must span "
+                                 f"at least {(chunk_length - 1) * chunk_step + 1} frames")
             self.is_multilabel = False if len(torch.tensor(self.labels[0]).shape) == 1 else True
 
     def proc_target(self, target):
@@ -246,10 +260,12 @@ class ClsDataset():
             return outputs, names
 
     def __getitem__(self, index):
-        """Return the chunk at ``index``, retrying up to 3 random indices on failure."""
+        """Return a chunk; inference fails on decode errors, other splits retry."""
         try:
             return self.get_item_simple(index)
-        except Exception:
+        except Exception as exc:
+            if self.partition == "inference":
+                raise RuntimeError(f"Failed to decode inference chunk {self.samples[index]!r}") from exc
             logger.warning("Error loading index %d:\n%s", index, traceback.format_exc())
             for _ in range(3):
                 alt_index = np.random.randint(0, len(self))
@@ -265,14 +281,18 @@ class ClsDataset():
         return len(self.samples)
 
 
-def collate_fn_val(batch):
+def collate_fn_val(
+    batch: list[tuple[torch.Tensor, torch.Tensor, list[tuple[str, int, int]]]],
+) -> tuple[torch.Tensor, torch.Tensor, tuple[list[tuple[str, int, int]], ...]]:
     """Collate ``(tensor, target, names)`` items, stacking tensors and targets."""
     tensors, targets, names = zip(*batch)
     tensors = torch.stack(tensors)
     targets = torch.stack(targets)
     return tensors, targets, names
 
-def collate_fn_inference(batch):
+def collate_fn_inference(
+    batch: list[tuple[torch.Tensor, list[tuple[str, int, int]]]],
+) -> tuple[torch.Tensor, tuple[list[tuple[str, int, int]], ...]]:
     """Collate ``(tensor, names)`` items, stacking tensors into a batch."""
     tensors, names = zip(*batch)
     tensors = torch.stack(tensors)

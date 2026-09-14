@@ -247,6 +247,54 @@ def ensemble_predictions(
     return logits
 
 
+class EmbeddingWriter:
+    """Writes per-frame embeddings as one ``{video_stem}.npy`` of shape (n_frames, D) per video.
+
+    Keeps a running mean per frame for the current video only, and saves it, gap-filled
+    exactly like the predictions, when the next video's chunks begin. Memory is one video's
+    final array regardless of chunk overlap; collecting every chunk's rows, as the predictions
+    do, would grow with video length x overlap x hidden_dim and run out of RAM on long videos.
+    Needs chunks grouped by video, as the unshuffled inference loader yields them. Call
+    ``close()`` after the last batch.
+    """
+
+    def __init__(self, video_prefix: str, out_dir: str) -> None:
+        os.makedirs(out_dir, exist_ok=True)
+        self.video_prefix = video_prefix
+        self.out_dir = out_dir
+        self.video: str | None = None
+        self.saved: set[str] = set()
+        self.sums = np.zeros((0, 0), dtype=np.float32)
+        self.counts = np.zeros(0)
+
+    def add(self, names: list[tuple[str, int, int]], embeddings: np.ndarray) -> None:
+        """Add a batch of (filename, frame_in_video, frame_in_chunk) names and their (N, D) embeddings."""
+        for (fn, frame, _), row in zip(names, embeddings, strict=True):
+            if fn != self.video:
+                self.close()
+                if fn in self.saved:
+                    raise ValueError(f"Chunks of {fn!r} are not contiguous; embeddings need an unshuffled loader")
+                n_frames = get_frame_count(os.path.join(self.video_prefix, fn))
+                self.video = fn
+                self.sums = np.zeros((n_frames, embeddings.shape[1]), dtype=np.float32)
+                self.counts = np.zeros(n_frames)
+            self.sums[frame] += row
+            self.counts[frame] += 1
+
+    def close(self) -> None:
+        """Average, gap-fill and save the current video, if any."""
+        if self.video is None:
+            return
+        covered = np.flatnonzero(self.counts)
+        self.sums[covered] /= self.counts[covered, None]
+        # One averaged row per covered frame, so ensemble_predictions only fills the uncovered frames.
+        seen = [((self.video, int(i), 0), self.sums[i]) for i in covered]
+        filled = ensemble_predictions(seen, {self.video: np.zeros_like(self.sums)})[self.video]
+        np.save(os.path.join(self.out_dir, os.path.splitext(self.video)[0] + '.npy'), filled)
+        self.saved.add(self.video)
+        self.video = None
+
+
 def postprocess_predictions(predictions: dict[str, np.ndarray],
                             smoothing_window: int | None = None) -> dict[str, np.ndarray]:
     """Post-process an ensembled per-frame prediction matrix dict, in place.

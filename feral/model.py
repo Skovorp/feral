@@ -57,11 +57,13 @@ class FeralModel(nn.Module):
         self.head = nn.Linear(d, num_classes)
         self.backbone.freeze_encoder(freeze_encoder_layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor,
+                return_embeddings: bool = False) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Run input through backbone, attention pooling, norm/dropout, and head; returns class
-        logits of shape (B * predict_per_item, num_classes)."""
+        logits of shape (B * predict_per_item, num_classes). With return_embeddings, also returns
+        the attention-pooled per-frame embeddings, shape (B * predict_per_item, hidden_dim)."""
         x = self.backbone(x)
-        x = self.clip_projector(x)
-        x = self.fc_norm(x)
+        embeddings = self.clip_projector(x)
+        x = self.fc_norm(embeddings)
         x = self.head(self.fc_dropout(x))
-        return x
+        return (x, embeddings) if return_embeddings else x

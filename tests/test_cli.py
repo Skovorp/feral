@@ -229,11 +229,13 @@ class TestCmdInfer:
         args = argparse.Namespace(
             checkpoint="ck.pt", video_folder="vf", output="out.json",
             batch_size=16, num_workers=2, compile=True, mode="max", resolution=384,
+            save_embeddings="emb",
         )
         cli._cmd_infer(args)
         assert recorded == dict(
             checkpoint_path="ck.pt", video_folder="vf", output="out.json",
             batch_size=16, num_workers=2, compile=True, mode="max", resolution=384,
+            save_embeddings="emb",
         )
 
     def test_compile_defaults_false_when_absent(self, monkeypatch):
@@ -241,7 +243,7 @@ class TestCmdInfer:
         recorded = self._stub_inference(monkeypatch)
         args = argparse.Namespace(
             checkpoint="ck.pt", video_folder="vf", output=None,
-            batch_size=8, num_workers=4, mode=None, resolution=None,
+            batch_size=8, num_workers=4, mode=None, resolution=None, save_embeddings=None,
         )
         cli._cmd_infer(args)
         assert recorded["compile"] is False

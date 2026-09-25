@@ -1,3 +1,4 @@
+import json
 import os
 
 import numpy as np
@@ -62,7 +63,7 @@ class TestEmbeddingWriter:
     def test_streamed_embeddings_match_ensembled_predictions(self, tmp_path, monkeypatch):
         monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: self.FRAMES[os.path.basename(path)])
         rows = self._chunks(np.random.default_rng(0))
-        writer = EmbeddingWriter("videos", str(tmp_path))
+        writer = EmbeddingWriter("videos", str(tmp_path), {"run": "r1"})
         for i in range(0, len(rows), 7):  # batches that straddle the two videos
             batch = rows[i:i + 7]
             writer.add([name for name, _ in batch], np.stack([row for _, row in batch]))
@@ -70,7 +71,10 @@ class TestEmbeddingWriter:
 
         expected = ensemble_predictions(rows, {fn: np.zeros((n, 4)) for fn, n in self.FRAMES.items()})
         for fn in self.FRAMES:
-            np.testing.assert_allclose(np.load(tmp_path / fn.replace(".mp4", ".npy")), expected[fn], rtol=1e-5)
+            saved = np.load(tmp_path / (fn + ".npz"))
+            np.testing.assert_allclose(saved["embeddings"], expected[fn], rtol=1e-5)
+            metadata = json.loads(str(saved["metadata"]))
+            assert metadata["run"] == "r1" and metadata["video"] == fn and metadata["n_frames"] == self.FRAMES[fn]
 
     def test_video_split_across_the_folder_is_refused(self, tmp_path, monkeypatch):
         monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: 40)

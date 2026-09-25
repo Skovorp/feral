@@ -1,8 +1,11 @@
 """Run inference on all videos in a folder using a saved checkpoint."""
+import datetime
+import hashlib
 import importlib.resources
 import json
 import logging
 import os
+import sys
 
 import torch
 import yaml
@@ -10,6 +13,8 @@ from torch.utils.data import DataLoader
 
 _DEFAULT_CONFIG = importlib.resources.files("feral").joinpath("default_config.yaml")
 
+import feral
+from feral.backbones import get_hidden_dim
 from feral.dataset import (
     ClsDataset,
     collate_fn_inference,
@@ -58,6 +63,40 @@ def _load_default_cfg():
             return yaml.safe_load(f)
 
 
+def _sha256(path, chunk_bytes=1 << 24):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(chunk_bytes), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _embeddings_metadata(checkpoint_path, cfg, class_names, is_multilabel, video_folder, mode, resolution):
+    """Provenance stored inside every embeddings .npz so two runs' outputs can be told apart."""
+    return {
+        'checkpoint_path': os.path.abspath(checkpoint_path),
+        'checkpoint_sha256': _sha256(checkpoint_path),
+        'run_name': cfg.get('run_name'),
+        'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        'feral_version': feral.__version__,
+        'torch_version': torch.__version__,
+        'command': sys.argv,
+        'video_folder': os.path.abspath(video_folder),
+        'backbone': cfg['backbone'],
+        'hidden_dim': get_hidden_dim(cfg['backbone']),
+        'embedding_point': 'attention-pooled per-frame, after clip_projector, before fc_norm',
+        'chunk_length': cfg['data']['chunk_length'],
+        'chunk_shift': cfg['data']['chunk_shift'],
+        'chunk_step': cfg['data']['chunk_step'],
+        'resize_to': cfg['data']['resize_to'],
+        'resize_style': cfg['data'].get('resize_style', 'square'),
+        'mode': mode,
+        'resolution_override': resolution,
+        'class_names': class_names,
+        'is_multilabel': is_multilabel,
+    }
+
+
 def run_inference_folder(checkpoint_path, video_folder, output=None,
                          batch_size=8, num_workers=4, compile=False,
                          mode=None, resolution=None, save_embeddings=None):
@@ -68,8 +107,9 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     overrides (compile, mode -> chunk_shift, resolution -> resize_to), loads the
     model and its class metadata, builds a chunk dataset/loader, runs inference,
     and saves results to `output` (defaults to inference_<folder>.json). With
-    `save_embeddings`, also writes one (frames, hidden_dim) .npy of attention-pooled
-    per-frame embeddings per video to that folder.
+    `save_embeddings`, also writes one `{filename}.npz` per video to that folder, holding
+    the (frames, hidden_dim) attention-pooled per-frame embeddings and a JSON metadata
+    string recording the checkpoint and settings that produced them.
     """
     # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
     # Falling back to default_config only covers legacy checkpoints where the
@@ -165,7 +205,11 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     )
 
     logger.info("Running inference on %d chunks...", len(dataset))
-    embedding_writer = EmbeddingWriter(video_folder, save_embeddings) if save_embeddings else None
+    embedding_writer = None
+    if save_embeddings:
+        metadata = _embeddings_metadata(checkpoint_path, cfg, class_names, is_multilabel,
+                                        video_folder, mode, resolution)
+        embedding_writer = EmbeddingWriter(video_folder, save_embeddings, metadata)
     answers = run_inference(model, loader, is_multilabel=is_multilabel, device=device,
                             embedding_writer=embedding_writer)
     if embedding_writer is not None:

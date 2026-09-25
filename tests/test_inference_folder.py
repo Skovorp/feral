@@ -74,9 +74,14 @@ def test_inference_folder(trained_checkpoint, tmp_path):
 
         hidden_dim = get_hidden_dim(torch.load(trained_checkpoint, map_location='cpu')['cfg']['backbone'])
         for fn, preds in results['preds'].items():
-            embeddings = np.load(tmp_path / 'embeddings' / (os.path.splitext(fn)[0] + '.npy'))
+            saved = np.load(tmp_path / 'embeddings' / (fn + '.npz'))
+            embeddings = saved['embeddings']
             assert embeddings.shape == (len(preds), hidden_dim)
             assert np.isfinite(embeddings).all()
+            metadata = json.loads(str(saved['metadata']))
+            assert metadata['checkpoint_path'] == os.path.abspath(trained_checkpoint)
+            assert metadata['video'] == fn and metadata['n_frames'] == len(preds)
+            assert metadata['hidden_dim'] == hidden_dim
     finally:
         if os.path.exists(output_path):
             os.unlink(output_path)

@@ -281,9 +281,9 @@ def main():
     p_infer.add_argument('--resolution', type=int, default=None,
                          help='Override the square input resolution at inference (default: as trained, '
                               'read from the checkpoint).')
-    p_infer.add_argument('--save_embeddings', default=None, metavar='DIR',
-                         help='Also write one (frames, hidden_dim) .npy of attention-pooled per-frame '
-                              'embeddings per video to DIR.')
+    p_infer.add_argument('--save_embeddings', default=None,
+                         help='Path to folder to write one {filename}.npz per video with the (frames, hidden_dim) '
+                              'attention-pooled per-frame embeddings and a metadata JSON string.')
     p_infer.set_defaults(func=_cmd_infer)
 
     # feral reencode

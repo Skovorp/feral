@@ -1,7 +1,11 @@
+import os
+
 import numpy as np
 import pytest
 
+import feral.metrics
 from feral.metrics import (
+    EmbeddingWriter,
     calc_frame_level_map,
     calculate_f1_metrics,
     ensemble_predictions,
@@ -38,6 +42,44 @@ def _multilabel_labels_json(n_classes=3, n_frames=10):
         "labels": labels,
         "splits": {"val": ["vid.mp4"]},
     }
+
+
+# ===================================================================
+# EmbeddingWriter
+# ===================================================================
+
+class TestEmbeddingWriter:
+    FRAMES = {"a.mp4": 40, "b.mp4": 25}
+
+    def _chunks(self, rng, dim=4):
+        """Overlapping, strided chunks (length 4, step 3, shift 5) of two videos, in loader order."""
+        rows = []
+        for fn, n_frames in self.FRAMES.items():
+            for start in range(0, n_frames - 9, 5):
+                rows += [((fn, start + 3 * k, k), rng.normal(size=dim).astype(np.float32)) for k in range(4)]
+        return rows
+
+    def test_streamed_embeddings_match_ensembled_predictions(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: self.FRAMES[os.path.basename(path)])
+        rows = self._chunks(np.random.default_rng(0))
+        writer = EmbeddingWriter("videos", str(tmp_path))
+        for i in range(0, len(rows), 7):  # batches that straddle the two videos
+            batch = rows[i:i + 7]
+            writer.add([name for name, _ in batch], np.stack([row for _, row in batch]))
+        writer.close()
+
+        expected = ensemble_predictions(rows, {fn: np.zeros((n, 4)) for fn, n in self.FRAMES.items()})
+        for fn in self.FRAMES:
+            np.testing.assert_allclose(np.load(tmp_path / fn.replace(".mp4", ".npy")), expected[fn], rtol=1e-5)
+
+    def test_video_split_across_the_folder_is_refused(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: 40)
+        writer = EmbeddingWriter("videos", str(tmp_path))
+        row = np.zeros((1, 4), dtype=np.float32)
+        writer.add([("a.mp4", 0, 0)], row)
+        writer.add([("b.mp4", 0, 0)], row)
+        with pytest.raises(ValueError, match="not contiguous"):
+            writer.add([("a.mp4", 5, 0)], row)
 
 
 # ===================================================================

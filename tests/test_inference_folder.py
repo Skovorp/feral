@@ -2,12 +2,14 @@ import json
 import os
 import tempfile
 
+import numpy as np
 import pytest
 import torch
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
+from feral.backbones import get_hidden_dim
 from feral.train import main as train_main
 from feral.inference_folder import run_inference_folder
 
@@ -49,7 +51,7 @@ def trained_checkpoint():
 
 
 @_skip_no_fixtures
-def test_inference_folder(trained_checkpoint):
+def test_inference_folder(trained_checkpoint, tmp_path):
     with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
         output_path = f.name
     try:
@@ -59,6 +61,7 @@ def test_inference_folder(trained_checkpoint):
             output=output_path,
             batch_size=1,
             num_workers=0,
+            save_embeddings=str(tmp_path / 'embeddings'),
         )
 
         assert os.path.isfile(output_path)
@@ -68,6 +71,12 @@ def test_inference_folder(trained_checkpoint):
 
         assert 'preds' in results
         assert len(results['preds']) > 0
+
+        hidden_dim = get_hidden_dim(torch.load(trained_checkpoint, map_location='cpu')['cfg']['backbone'])
+        for fn, preds in results['preds'].items():
+            embeddings = np.load(tmp_path / 'embeddings' / (os.path.splitext(fn)[0] + '.npy'))
+            assert embeddings.shape == (len(preds), hidden_dim)
+            assert np.isfinite(embeddings).all()
     finally:
         if os.path.exists(output_path):
             os.unlink(output_path)

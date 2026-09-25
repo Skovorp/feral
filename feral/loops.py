@@ -203,8 +203,12 @@ def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
     return answers, avg_loss
 
 
-def run_inference(model, loader, *, is_multilabel, device, max_batches=None):
-    """Run model over an unlabeled loader. Returns answers."""
+def run_inference(model, loader, *, is_multilabel, device, max_batches=None, embedding_writer=None):
+    """Run model over an unlabeled loader. Returns answers.
+
+    embedding_writer: optional EmbeddingWriter that receives each batch's
+            attention-pooled per-frame embeddings.
+    """
     model.eval()
     answers = []
 
@@ -212,7 +216,11 @@ def run_inference(model, loader, *, is_multilabel, device, max_batches=None):
         for i, (data, names) in enumerate(tqdm(loader, total=len(loader))):
             data = data.to(device)
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
-                output = model(data)
+                if embedding_writer is None:
+                    output = model(data)
+                else:
+                    output, embeddings = model(data, return_embeddings=True)
+                    embedding_writer.add([n for item in names for n in item], embeddings.float().cpu().numpy())
                 output_prob = _to_prob(output, is_multilabel)
                 answers.extend(prep_for_answers(output_prob, None, names))
 

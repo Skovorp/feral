@@ -15,7 +15,7 @@ from feral.dataset import (
     collate_fn_inference,
 )
 from feral.loops import run_inference
-from feral.metrics import save_inference_results
+from feral.metrics import EmbeddingWriter, save_inference_results
 from feral.modeling import load_model_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s",
@@ -60,14 +60,16 @@ def _load_default_cfg():
 
 def run_inference_folder(checkpoint_path, video_folder, output=None,
                          batch_size=8, num_workers=4, compile=False,
-                         mode=None, resolution=None):
+                         mode=None, resolution=None, save_embeddings=None):
     """Run inference on every video in video_folder using a saved checkpoint and write results to JSON.
 
     Reads the training cfg embedded in the checkpoint (falling back to
     default_config.yaml for legacy checkpoints), applies optional inference-time
     overrides (compile, mode -> chunk_shift, resolution -> resize_to), loads the
     model and its class metadata, builds a chunk dataset/loader, runs inference,
-    and saves results to `output` (defaults to inference_<folder>.json).
+    and saves results to `output` (defaults to inference_<folder>.json). With
+    `save_embeddings`, also writes one (frames, hidden_dim) .npy of attention-pooled
+    per-frame embeddings per video to that folder.
     """
     # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
     # Falling back to default_config only covers legacy checkpoints where the
@@ -163,7 +165,12 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     )
 
     logger.info("Running inference on %d chunks...", len(dataset))
-    answers = run_inference(model, loader, is_multilabel=is_multilabel, device=device)
+    embedding_writer = EmbeddingWriter(video_folder, save_embeddings) if save_embeddings else None
+    answers = run_inference(model, loader, is_multilabel=is_multilabel, device=device,
+                            embedding_writer=embedding_writer)
+    if embedding_writer is not None:
+        embedding_writer.close()
+        logger.info("Embeddings saved to %s", save_embeddings)
 
     if output is None:
         folder_name = os.path.basename(os.path.normpath(video_folder))

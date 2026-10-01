@@ -2,6 +2,9 @@ import torch
 from torch import nn
 
 from feral.backbones import BackboneAdapter
+from feral import rocm_compat
+
+rocm_compat.apply()
 
 
 class AttentionPoolingBlockCustom(nn.Module):

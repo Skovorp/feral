@@ -57,6 +57,8 @@ We've used RunPod extensively to run experiments. It's very easy to set up.
 
 ### Troubleshooting
 
+- **AMD RDNA GPUs (ROCm): use PyTorch 2.13+** Older PyTorch ROCm builds have a LayerNorm backward bug on RDNA (wave32) GPUs, such as the RX 9070 XT, Radeon AI PRO R9700, and Radeon 8060S (Strix Halo), that can silently produce incorrect gradients even while training loss decreases. Upgrade to a compatible ROCm build of PyTorch 2.13+ for the upstream fix. See [PR #23](https://github.com/Skovorp/feral/pull/23) and the [upstream Strix Halo report](https://github.com/pytorch/pytorch/issues/183861) for details and hardware validation.
+
 - **V-JEPA 2.1 backbone download fails with `URLError: [Errno 111] Connection refused`.** Upstream's `facebookresearch/vjepa2` `torch.hub` repo currently ships a leftover test URL (`VJEPA_BASE_URL = "http://localhost:8300"`). Point it back at the public CDN in the cached copy:
   ```
   sed -i 's|http://localhost:8300|https://dl.fbaipublicfiles.com/vjepa2|' \

@@ -1,0 +1,25 @@
+name: GPU tests
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the full suite on a RunPod GPU
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: .github/scripts/runpod_gpu_tests.sh
+      - name: Make sure the pod is gone
+        if: always() && env.RUNPOD_POD_ID != ''
+        run: |
+          curl -sS -o /dev/null -w "delete: HTTP %{http_code}\n" -X DELETE \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" "https://api.runpod.io/v2/pods/$RUNPOD_POD_ID"

@@ -11,12 +11,38 @@ load it, its hidden dimension, and the native input resolution its weights
 were trained at. FeralModel reads hidden_dim from here to size its head, and
 training/inference entrypoints use img_size to warn on resize_to mismatches.
 """
+import contextlib
 import logging
 
 import torch
 from torch import nn
 
 logger = logging.getLogger(__name__)
+
+# torch.hub and trust_remote_code both execute code fetched at load time, so
+# each source is pinned to an exact commit. Bump these deliberately.
+_VJEPA2_HUB_REPO = "facebookresearch/vjepa2:204698b45b3712590f06245fbfba32d3be539812"
+
+# Upstream vjepa2 ships a leftover test override (VJEPA_BASE_URL pointing at
+# localhost:8300), so every V-JEPA 2.1 weight download fails out of the box.
+_VJEPA2_BROKEN_BASE_URL = "http://localhost:8300"
+_VJEPA2_BASE_URL = "https://dl.fbaipublicfiles.com/vjepa2"
+
+
+@contextlib.contextmanager
+def _vjepa2_weights_from_cdn():
+    """Redirect vjepa2's weight downloads from its test URL to the public CDN."""
+    original = torch.hub.load_state_dict_from_url
+
+    def load_state_dict_from_url(url, *args, **kwargs):
+        url = url.replace(_VJEPA2_BROKEN_BASE_URL, _VJEPA2_BASE_URL)
+        return original(url, *args, **kwargs)
+
+    torch.hub.load_state_dict_from_url = load_state_dict_from_url
+    try:
+        yield
+    finally:
+        torch.hub.load_state_dict_from_url = original
 
 BACKBONES = {
     # V-JEPA 2 — HuggingFace slugs.
@@ -70,12 +96,14 @@ BACKBONES = {
     "videoprism_v1_base": {
         "source": "videoprism_hf",
         "slug": "sposiboh/videoprism-base-f16r288-pt",
+        "revision": "82d97c3e1c42b1e960801857541892fb4d7e9aff",
         "hidden_dim": 768,
         "img_size": 288,
     },
     "videoprism_v1_large": {
         "source": "videoprism_hf",
         "slug": "sposiboh/videoprism-large-f8r288-pt",
+        "revision": "acc4521b968bba2700a192566f3bfdc54285bd28",
         "hidden_dim": 1024,
         "img_size": 288,
     },
@@ -130,7 +158,7 @@ class BackboneAdapter(nn.Module):
         """Build the underlying encoder for backbone.
 
         Dispatches on the entry's source: HF AutoModel (drops the predictor),
-        torch.hub V-JEPA 2.1, or VideoPrism (requires torch >= 2.5 and registers
+        torch.hub V-JEPA 2.1, or VideoPrism (registers
         ImageNet mean/std buffers for denormalization). pretrained=False builds a
         randomly-initialized architecture from config with no weight download.
         """
@@ -151,12 +179,16 @@ class BackboneAdapter(nn.Module):
             if gradient_checkpointing:
                 self.model.gradient_checkpointing_enable()
         elif self.source == "hub":
-            encoder, _predictor = torch.hub.load(
-                "facebookresearch/vjepa2",
-                entry["hub_name"],
-                pretrained=pretrained,
-                trust_repo=True,
-            )
+            # skip_validation: torch.hub only accepts a commit SHA that is a
+            # branch or tag head, which stops being true once upstream moves.
+            with _vjepa2_weights_from_cdn():
+                encoder, _predictor = torch.hub.load(
+                    _VJEPA2_HUB_REPO,
+                    entry["hub_name"],
+                    pretrained=pretrained,
+                    trust_repo=True,
+                    skip_validation=True,
+                )
             self.model = encoder
             if gradient_checkpointing:
                 self.model.use_activation_checkpointing = True
@@ -166,24 +198,14 @@ class BackboneAdapter(nn.Module):
                     "gradient_checkpointing is not supported for VideoPrism backbones. "
                     "Use a V-JEPA 2 or V-JEPA 2.1 backbone, or disable gradient_checkpointing."
                 )
-            # VideoPrism's modeling code uses torch.nn.attention.flex_attention,
-            # which only exists in torch >= 2.5 (feral's floor is 2.4, which is
-            # fine for the V-JEPA backbones). Fail with a clear message instead
-            # of a cryptic ModuleNotFoundError deep inside trust_remote_code.
-            try:
-                from torch.nn.attention import flex_attention  # noqa: F401
-            except ModuleNotFoundError as e:
-                raise RuntimeError(
-                    f"VideoPrism backbones require torch >= 2.5 (for "
-                    f"torch.nn.attention.flex_attention); found torch {torch.__version__}. "
-                    f"Upgrade torch, or use a V-JEPA 2 / 2.1 backbone."
-                ) from e
             from transformers import AutoConfig, AutoModel
+            slug, revision = entry["slug"], entry["revision"]
             if pretrained:
-                self.model = AutoModel.from_pretrained(entry["slug"], trust_remote_code=True)
+                self.model = AutoModel.from_pretrained(slug, trust_remote_code=True, revision=revision)
             else:
-                cfg = AutoConfig.from_pretrained(entry["slug"], trust_remote_code=True)
-                self.model = AutoModel.from_config(cfg, trust_remote_code=True)
+                cfg = AutoConfig.from_pretrained(slug, trust_remote_code=True, revision=revision)
+                # from_config takes the modeling code's commit as code_revision.
+                self.model = AutoModel.from_config(cfg, trust_remote_code=True, code_revision=revision)
             mean = torch.tensor(_IMAGENET_MEAN).view(1, 1, 1, 1, 3)
             std = torch.tensor(_IMAGENET_STD).view(1, 1, 1, 1, 3)
             self.register_buffer("_vp_mean", mean)

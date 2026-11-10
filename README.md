@@ -30,10 +30,10 @@ That's it. Now you should be able to run everything.
 
 - Preferably Linux. Windows should work too. We haven't tested on Mac.
 - Python 3.10+
-- PyTorch 2.5+ (with a compatible CUDA version)
+- PyTorch 2.6+ (with a compatible CUDA version)
 - NVIDIA GPU with Ampere architecture or newer (compute capability 8.0+). 8 GB configurations are benchmarked below; 24+ GB gives more room for batch size. FERAL uses bfloat16 and flash attention, which require newer architectures.
 
-> Historical V-JEPA experiments used PyTorch 2.4, but `pip install feral` requires PyTorch 2.5+ and may upgrade a 2.4 environment. VideoPrism needs `torch.nn.attention.flex_attention`, introduced in 2.5.
+> Historical V-JEPA experiments used PyTorch 2.4, but `pip install feral` requires PyTorch 2.6+ and may upgrade an older environment. Earlier releases can execute code from an untrusted checkpoint file.
 
 > Older GPUs like V100 (Volta) and T4 (Turing) — including free Google Colab T4 instances — will **not** work. Supported GPUs include: A100, H100, A10, L4, L40, RTX 3000/4000/5000 series, and newer.
 
@@ -45,12 +45,12 @@ feral train path/to/videos path/to/labels.json --mode lite --gradient-checkpoint
 
 [Paper v2, Table 3](https://www.biorxiv.org/content/10.1101/2025.11.16.688666v2.full.pdf) benchmarks an RTX 3070 (8 GB): lite with gradient checkpointing trains at 1.82 chunks/s and runs inference at 7 chunks/s, with an estimated 24.2 hours for full CalMS21 training. These are measured recipe-specific rates, not guarantees for every dataset; Table 8 compares preset accuracy. Training stays on your own hardware with `--no-wandb` (initial model-weight downloads still require network access).
 
-The Docker image uses PyTorch 2.5.1 / CUDA 12.4. The V-JEPA experiments also used PyTorch 2.4 / CUDA 12.4; install 2.5+ for the full backbone selection. PyTorch is intentionally not pinned so existing GPU environments can keep a compatible build.
+The Docker image uses PyTorch 2.11.0 / CUDA 12.8. The V-JEPA experiments used PyTorch 2.4 / CUDA 12.4. PyTorch is intentionally not pinned so existing GPU environments can keep a compatible build.
 
 ### Windows Notes
 
 - `decord` and `triton-windows` are installed automatically. Windows GPU training has not been revalidated for this release.
-- Triton must match your PyTorch minor version: 2.5 → 3.1, 2.6 → 3.2, 2.7 → 3.3, 2.8 → 3.4, 2.9 → 3.5, 2.10 → 3.6. For example, with PyTorch 2.10 run `pip install "triton-windows>=3.6,<3.7"`. Unlike the other dependencies, it is not pinned because it follows the user-installed PyTorch build. See the [upstream compatibility table](https://github.com/triton-lang/triton-windows).
+- Triton must match your PyTorch minor version: 2.6 → 3.2, 2.7 → 3.3, 2.8 → 3.4, 2.9 → 3.5, 2.10 → 3.6. For example, with PyTorch 2.10 run `pip install "triton-windows>=3.6,<3.7"`. Unlike the other dependencies, it is not pinned because it follows the user-installed PyTorch build. See the [upstream compatibility table](https://github.com/triton-lang/triton-windows).
 - **PyTorch 2.8-2.9 has a known bug on Windows** where `torch.compile` crashes with `OverflowError: Python int too large to convert to C long` ([pytorch#162430](https://github.com/pytorch/pytorch/issues/162430)). Use PyTorch 2.7 or 2.10+ to avoid this. See [issue #11](https://github.com/Skovorp/feral/issues/11) for details.
 
 We've used RunPod extensively to run experiments. It's very easy to set up.
@@ -58,13 +58,6 @@ We've used RunPod extensively to run experiments. It's very easy to set up.
 ### Troubleshooting
 
 - **AMD RDNA GPUs (ROCm): use PyTorch 2.13+** Older PyTorch ROCm builds have a LayerNorm backward bug on RDNA (wave32) GPUs, such as the RX 9070 XT, Radeon AI PRO R9700, and Radeon 8060S (Strix Halo), that can silently produce incorrect gradients even while training loss decreases. Upgrade to a compatible ROCm build of PyTorch 2.13+ for the upstream fix. See [PR #23](https://github.com/Skovorp/feral/pull/23) and the [upstream Strix Halo report](https://github.com/pytorch/pytorch/issues/183861) for details and hardware validation.
-
-- **V-JEPA 2.1 backbone download fails with `URLError: [Errno 111] Connection refused`.** Upstream's `facebookresearch/vjepa2` `torch.hub` repo currently ships a leftover test URL (`VJEPA_BASE_URL = "http://localhost:8300"`). Point it back at the public CDN in the cached copy:
-  ```
-  sed -i 's|http://localhost:8300|https://dl.fbaipublicfiles.com/vjepa2|' \
-    ~/.cache/torch/hub/facebookresearch_vjepa2_main/src/hub/backbones.py
-  ```
-  This only affects the `vjepa2_1_*` (V-JEPA 2.1) backbones.
 
 ## Running FERAL
 

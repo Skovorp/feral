@@ -53,7 +53,7 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
     Returns (model, metadata) where metadata is a dict with 'class_names' and
     'is_multilabel', or None for legacy checkpoints.
     """
-    raw = torch.load(checkpoint_path, map_location="cpu")
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
     if isinstance(raw, dict) and 'state_dict' in raw:
         state_dict = raw['state_dict']

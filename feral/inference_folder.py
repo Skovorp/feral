@@ -115,7 +115,7 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     # Falling back to default_config only covers legacy checkpoints where the
     # cfg wasn't persisted — the data/model params in default_config may not
     # match how the model was actually trained.
-    raw = torch.load(checkpoint_path, map_location="cpu")
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     stored_cfg = raw.get('cfg') if isinstance(raw, dict) else None
     if stored_cfg is not None:
         cfg = stored_cfg

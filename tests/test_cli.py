@@ -8,6 +8,7 @@ and without torch/wandb installed.
 """
 
 import argparse
+import os
 import sys
 import types
 
@@ -323,17 +324,36 @@ class TestCmdTrain:
         assert cfg["data"]["label_json"] == "labels.json"
         assert cfg["run_name"] == "run-xyz"
 
-    def test_public_wandb_uses_shared_account(self, stubs):
-        cli._cmd_train(_train_args(public_wandb=True))
-        assert stubs.logged == [{"key": "dde17687b4b84ba8171dfede64d865243be41a0e"}]
-        cfg = stubs.trained[0]
-        assert cfg["wandb"] == {"entity": "sposiboh", "project": "feral_public"}
+    @pytest.fixture
+    def relay(self, monkeypatch):
+        """Stub the relay health check and keep W&B env changes out of other tests."""
+        for name in ("WANDB_BASE_URL", "WANDB_APP_URL", "WANDB_API_KEY"):
+            monkeypatch.delenv(name, raising=False)
+        state = types.SimpleNamespace(reachable=True)
+        monkeypatch.setattr(cli, "_shared_relay_reachable", lambda: state.reachable)
+        return state
 
-    def test_interactive_open(self, monkeypatch, stubs):
+    def _assert_logs_through_relay(self, stubs):
+        assert stubs.logged == []  # no login: the relay holds the real key
+        assert os.environ["WANDB_BASE_URL"] == "https://wandb.getferal.ai"
+        assert os.environ["WANDB_APP_URL"] == "https://wandb.ai"
+        assert len(os.environ["WANDB_API_KEY"]) >= 40  # shortest key the W&B client accepts
+        assert stubs.trained[0]["wandb"] == {"entity": "sposiboh", "project": "feral_public"}
+
+    def test_public_wandb_uses_shared_account(self, stubs, relay):
+        cli._cmd_train(_train_args(public_wandb=True))
+        self._assert_logs_through_relay(stubs)
+
+    def test_public_wandb_without_relay_trains_without_wandb(self, stubs, relay):
+        relay.reachable = False
+        cli._cmd_train(_train_args(public_wandb=True))
+        assert "wandb" not in stubs.trained[0]
+        assert "WANDB_BASE_URL" not in os.environ
+
+    def test_interactive_open(self, monkeypatch, stubs, relay):
         monkeypatch.setattr("builtins.input", lambda *a, **k: "open")
         cli._cmd_train(_train_args())
-        assert stubs.logged == [{"key": "dde17687b4b84ba8171dfede64d865243be41a0e"}]
-        assert stubs.trained[0]["wandb"] == {"entity": "sposiboh", "project": "feral_public"}
+        self._assert_logs_through_relay(stubs)
 
     def test_interactive_skip(self, monkeypatch, stubs):
         monkeypatch.setattr("builtins.input", lambda *a, **k: "skip")

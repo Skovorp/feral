@@ -15,6 +15,42 @@ def _load_default_config():
             return yaml.safe_load(f)
 
 
+# ── shared W&B project ───────────────────────────────────────────────────────
+
+# The community W&B project is reached through a relay that holds the real API key
+# and only accepts the calls needed to log a run there. The W&B client still insists
+# on a key of 40+ characters, so it gets a placeholder that the relay ignores.
+SHARED_WANDB_RELAY = "https://wandb.getferal.ai"
+SHARED_WANDB_PLACEHOLDER_KEY = "feral-community-relay-placeholder-not-a-real-key"
+SHARED_WANDB_ENTITY = "sposiboh"
+SHARED_WANDB_PROJECT = "feral_public"
+
+
+def _shared_relay_reachable():
+    """Return True if the community W&B relay answers its health check."""
+    import urllib.request
+    # Cloudflare, which hosts the relay, rejects Python's default User-Agent.
+    request = urllib.request.Request(SHARED_WANDB_RELAY + "/healthz", headers={"User-Agent": "feral"})
+    try:
+        urllib.request.urlopen(request, timeout=10).close()
+    except OSError:
+        return False
+    return True
+
+
+def _use_shared_wandb(cfg):
+    """Log this run to the community W&B project, or to stdout only if the relay is down."""
+    if not _shared_relay_reachable():
+        print(f"Cannot reach the community W&B relay ({SHARED_WANDB_RELAY}); "
+              "continuing without W&B, metrics will be printed to stdout only.")
+        cfg.pop('wandb', None)
+        return
+    os.environ['WANDB_BASE_URL'] = SHARED_WANDB_RELAY
+    os.environ['WANDB_APP_URL'] = "https://wandb.ai"  # run links should open wandb.ai, not the relay
+    os.environ['WANDB_API_KEY'] = SHARED_WANDB_PLACEHOLDER_KEY
+    cfg['wandb'] = {'entity': SHARED_WANDB_ENTITY, 'project': SHARED_WANDB_PROJECT}
+
+
 # ── train ────────────────────────────────────────────────────────────────────
 
 def _cmd_train(args):
@@ -47,10 +83,6 @@ def _cmd_train(args):
     if args.gradient_checkpointing:
         cfg['model']['gradient_checkpointing'] = True
 
-    SHARED_WANDB_KEY = "dde17687b4b84ba8171dfede64d865243be41a0e"
-    SHARED_WANDB_ENTITY = "sposiboh"
-    SHARED_WANDB_PROJECT = "feral_public"
-
     if args.no_wandb:
         print("Skipping W&B (--no-wandb); metrics will be printed to stdout only.")
         cfg.pop('wandb', None)
@@ -59,8 +91,7 @@ def _cmd_train(args):
 
     if args.public_wandb:
         print("Logging to the shared public W&B account (--public-wandb); no prompt.")
-        wandb.login(key=SHARED_WANDB_KEY)
-        cfg['wandb'] = {'entity': SHARED_WANDB_ENTITY, 'project': SHARED_WANDB_PROJECT}
+        _use_shared_wandb(cfg)
         train_main(cfg)
         return
 
@@ -74,8 +105,7 @@ def _cmd_train(args):
 
     if res == "open":
         print("Using shared account")
-        wandb.login(key=SHARED_WANDB_KEY)
-        cfg['wandb'] = {'entity': SHARED_WANDB_ENTITY, 'project': SHARED_WANDB_PROJECT}
+        _use_shared_wandb(cfg)
     elif res == "personal":
         key = input('Paste your wandb api_key: ').strip()
         wandb.login(key=key)

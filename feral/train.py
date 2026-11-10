@@ -87,6 +87,8 @@ def _run(cfg):
     # (None = off). chunk overlap for those partitions is handled in data.py via
     # eval_chunk_shift.
     eval_smoothing = cfg['data'].get('eval_smoothing_window')
+    # max_batches cuts evaluation short, so some videos legitimately get no predictions.
+    truncated = cfg.get('max_batches') is not None
     model_save_metadata = {
         'class_names': class_names,
         'is_multilabel': labels_json['is_multilabel'],
@@ -174,7 +176,7 @@ def _run(cfg):
                 json.dump(answers, f)
             # Ensemble + smooth the per-frame predictions once, then feed every metric.
             val_preds = postprocess_predictions(
-                ensemble_predictions(answers, generate_empty_logits(labels_json, 'val')), eval_smoothing)
+                ensemble_predictions(answers, generate_empty_logits(labels_json, 'val'), truncated), eval_smoothing)
             logs = {
                 **calculate_multiclass_metrics(answers, class_names, 'val'),
                 **calculate_f1_metrics(val_preds, labels_json, 'val', labels_json['is_multilabel'], 'val', cfg['multilabel_threshold']),
@@ -185,7 +187,7 @@ def _run(cfg):
             _add_raster_logs(logs, val_preds, labels_json, 'val', 'val', 'val_optimal', cfg['multilabel_threshold'])
             if model_ema is not None:
                 val_ema_preds = postprocess_predictions(
-                    ensemble_predictions(answers_ema, generate_empty_logits(labels_json, 'val')), eval_smoothing)
+                    ensemble_predictions(answers_ema, generate_empty_logits(labels_json, 'val'), truncated), eval_smoothing)
                 ema_logs = {
                     **calculate_multiclass_metrics(answers_ema, class_names, 'val_ema'),
                     **calculate_f1_metrics(val_ema_preds, labels_json, 'val', labels_json['is_multilabel'], 'val_ema', cfg['multilabel_threshold']),
@@ -247,7 +249,7 @@ def _run(cfg):
         with open(os.path.join(answers_dir, f"{cfg['run_name']}_raw_test.json"), 'w') as f:
             json.dump(answers, f)
         predictions = postprocess_predictions(
-            ensemble_predictions(answers, generate_empty_logits(labels_json, 'test')), eval_smoothing)
+            ensemble_predictions(answers, generate_empty_logits(labels_json, 'test'), truncated), eval_smoothing)
         with open(os.path.join(answers_dir, f"{cfg['run_name']}_ensembled_test.json"), 'w') as f:
             if labels_json['is_multilabel']:
                 json.dump({
@@ -278,7 +280,8 @@ def _run(cfg):
             is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches')
         )
         out_pth = os.path.join(answers_dir, f"_inference_{cfg['run_name']}_{_str_now()}.json")
-        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth, smoothing_window=eval_smoothing)
+        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth, smoothing_window=eval_smoothing,
+                               allow_missing=truncated)
        
 
 def main(cfg: dict) -> None:

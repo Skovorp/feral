@@ -116,6 +116,19 @@ class TestEnsemblePredictions:
         result = ensemble_predictions(ans, logits)
         np.testing.assert_allclose(result["a.mp4"][1], [0.5, 0.5])
 
+    def test_video_without_predictions(self):
+        """A video with no predictions raises, unless a truncated run lets it stay zero."""
+        ans = [(("a.mp4", 0, 0), [1.0, 0.0])]
+
+        def empty():
+            return {"a.mp4": np.zeros((2, 2)), "b.mp4": np.zeros((2, 2))}
+
+        with pytest.raises(ValueError, match="No predictions for video 'b.mp4'"):
+            ensemble_predictions(ans, empty())
+        result = ensemble_predictions(ans, empty(), allow_missing=True)
+        np.testing.assert_allclose(result["b.mp4"], 0)
+        np.testing.assert_allclose(result["a.mp4"], [[1.0, 0.0], [1.0, 0.0]])
+
     def test_gap_interpolation(self):
         """Frames with no predictions between two predicted frames should be interpolated."""
         logits = {"a.mp4": np.zeros((5, 2))}

@@ -205,11 +205,13 @@ def calculate_optimal_f1_metrics(predictions: dict[str, np.ndarray], labels_json
 def ensemble_predictions(
     ans: list[tuple[tuple[str, int, int], list[float]]],
     logits: dict[str, np.ndarray],
+    allow_missing: bool = False,
 ) -> dict[str, np.ndarray]:
     """Accumulate per-chunk predictions into per-frame logits (uniform weights), averaging
     overlapping predictions and filling gaps by inverse-distance interpolation from the
     nearest predicted frames on either side. Raises ValueError if a requested video
-    has no predictions. Mutates and returns `logits`.
+    has no predictions, unless allow_missing is set (truncated max_batches debug runs),
+    in which case that video keeps its zeros. Mutates and returns `logits`.
     """
     sum_weights = {fn: np.zeros(val.shape[0]) for (fn, val) in logits.items()}
 
@@ -223,6 +225,8 @@ def ensemble_predictions(
     for fn in logits.keys():
         covered = sum_weights[fn] > 0
         if not covered.any():
+            if allow_missing:
+                continue
             raise ValueError(f"No predictions for video {fn!r}")
         # Normalize both neighbors before interpolating any missing frame.
         logits[fn][covered] /= sum_weights[fn][covered, None]
@@ -629,7 +633,8 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
     out.release()
 
 
-def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn, smoothing_window=None):
+def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn, smoothing_window=None,
+                           allow_missing=False):
     """Ensemble inference predictions (and EMA predictions if present) into per-frame logits
     and write them as JSON to save_fn under keys 'preds' and optionally 'ema_preds', each a
     dict[filename -> list-of-lists]. Frame counts are read from the videos under video_prefix.
@@ -643,14 +648,14 @@ def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn, smo
     for fn in labels_json['splits']['inference']:
         ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
 
-    out['preds'] = postprocess_predictions(ensemble_predictions(ans, ans_logits), smoothing_window)
+    out['preds'] = postprocess_predictions(ensemble_predictions(ans, ans_logits, allow_missing), smoothing_window)
     out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
 
     if len(ema_ans) > 0:
         ema_logits = {}
         for fn in labels_json['splits']['inference']:
             ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-        out['ema_preds'] = postprocess_predictions(ensemble_predictions(ema_ans, ema_logits), smoothing_window)
+        out['ema_preds'] = postprocess_predictions(ensemble_predictions(ema_ans, ema_logits, allow_missing), smoothing_window)
         out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
     with open(save_fn, 'w') as f:
         json.dump(out, f)

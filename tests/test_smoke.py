@@ -73,36 +73,38 @@ def test_smoke_resize_variants(resize_to, resize_style):
 
 
 def _make_nonsquare_fixture(tmp_dir, width, height, n_frames):
-    """Create a non-square test video + matching labels JSON + splits.
+    """Create one non-square test video per split + matching labels JSON.
 
     Returns (prefix_dir, labels_json_path). All labels are class 0 ("other");
     we're only checking the pipeline runs — not learning anything."""
     import cv2
     prefix = os.path.join(tmp_dir, 'videos')
     os.makedirs(prefix, exist_ok=True)
-    video_fn = 'nonsquare.mp4'
-    video_path = os.path.join(prefix, video_fn)
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi",
-         "-i", f"testsrc=duration={n_frames / 30:.3f}:size={width}x{height}:rate=30",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
-         video_path],
-        check=True, capture_output=True,
-    )
-    cap = cv2.VideoCapture(video_path)
-    try:
-        actual_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    finally:
-        cap.release()
+    labels = {}
+    for split in ('train', 'val', 'test'):
+        video_fn = f'nonsquare_{split}.mp4'
+        video_path = os.path.join(prefix, video_fn)
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi",
+             "-i", f"testsrc=duration={n_frames / 30:.3f}:size={width}x{height}:rate=30",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+             video_path],
+            check=True, capture_output=True,
+        )
+        cap = cv2.VideoCapture(video_path)
+        try:
+            labels[video_fn] = [0] * int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        finally:
+            cap.release()
     labels_json = {
         "class_names": {"0": "other", "1": "a", "2": "b"},
         "is_multilabel": False,
-        "labels": {video_fn: [0] * actual_frames},
+        "labels": labels,
         "splits": {
-            "train": [video_fn],
-            "val": [video_fn],
-            "test": [video_fn],
-            "inference": [video_fn],
+            "train": ['nonsquare_train.mp4'],
+            "val": ['nonsquare_val.mp4'],
+            "test": ['nonsquare_test.mp4'],
+            "inference": ['nonsquare_test.mp4'],
         },
     }
     labels_path = os.path.join(tmp_dir, 'labels.json')

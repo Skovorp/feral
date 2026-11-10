@@ -97,7 +97,9 @@ def test_backbone_forward(backbone_key, train_batches, cuda_cleanup):
             pretrained=False,
         )
     model.eval()
-    with torch.no_grad():
+    # feral.train leaves only the flash attention kernel enabled on CUDA, and it needs
+    # half-precision input, so match the bf16 autocast that training and inference use.
+    with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
         out = model(x_cpu.to(device))
 
     B = x_cpu.shape[0]

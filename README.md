@@ -26,6 +26,13 @@ pip install feral
 
 That's it. Now you should be able to run everything.
 
+`pip install feral` accepts a range of dependency versions so it can share an environment with other tools. To get the exact versions we test with, install [`requirements.txt`](requirements.txt) first:
+
+```
+pip install -r requirements.txt
+pip install feral
+```
+
 ### System Requirements
 
 - Preferably Linux. Windows should work too. We haven't tested on Mac.
@@ -69,7 +76,15 @@ FERAL needs videos in a format that supports random frame access, so we recommen
 feral reencode path/to/videos path/for/reencoded/videos
 ```
 
-### 2. Start Training
+### 2. Validate Your Dataset
+
+```
+feral validate path/to/videos path/to/labels.json
+```
+
+This checks the label JSON and that every video's frame count matches its labels, then prints a per-split summary of videos, labeled frames, and frames per class. Add `--json` to get a single JSON object for scripts; the exit code is 0 when the dataset is valid and 1 otherwise.
+
+### 3. Start Training
 
 ```
 feral train path/to/videos path/to/labels
@@ -81,7 +96,7 @@ Without either flag, this will prompt you about logging options — you can sele
 
 Results will be saved to `answers/_inference_{run_name}_{timestamp}.json`.
 
-### 3. Training from a Config
+### 4. Training from a Config
 
 If you don't want to run this in an interactive terminal, you can start training with:
 
@@ -91,7 +106,7 @@ feral train-config path/to/config
 
 This requires a config in the same format as the packaged `feral/default_config.yaml`.
 
-### 4. Inference
+### 5. Inference
 
 You can run inference through the train command by removing the train partition from your config. But you can also run inference standalone without a config:
 

@@ -4,7 +4,8 @@
 set -euo pipefail
 
 API=https://api.runpod.io/v2
-IMAGE=pytorch/pytorch:2.11.0-cuda12.8-cudnn9-devel  # same base image as the Dockerfile
+# RunPod's own PyTorch template image: already cached on their hosts, so the pod starts in seconds.
+IMAGE=runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 GPUS=("NVIDIA RTX A5000" "NVIDIA GeForce RTX 3090" "NVIDIA RTX A6000" "NVIDIA L4" "NVIDIA A40" "NVIDIA GeForce RTX 4090")
 TIMEOUT_MINUTES=45
 
@@ -16,9 +17,10 @@ api() {
 # code, then idle until this script deletes it.
 POD_COMMAND="(
   set -ex
+  export PIP_BREAK_SYSTEM_PACKAGES=1
   apt-get update && apt-get install -y --no-install-recommends git ffmpeg
   git clone https://github.com/$REPO /feral && cd /feral && git checkout $SHA
-  pip install -r requirements.txt && pip install . pytest
+  python -m pip install -r requirements.txt && python -m pip install . pytest
   python -m pytest tests -v
 ) > /gpu-tests.log 2>&1
 echo \$? > /gpu-tests.exit

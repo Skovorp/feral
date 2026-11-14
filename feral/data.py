@@ -1,5 +1,6 @@
 import logging
 
+import torch
 from torch.utils.data import DataLoader
 
 from feral.dataset import ClsDataset, collate_fn_val, collate_fn_inference
@@ -81,3 +82,28 @@ def build_datasets_and_loaders(cfg, labels_json, num_classes):
 
     logger.info("Dataset is multilabel: %s", labels_json['is_multilabel'])
     return datasets, loaders
+
+
+def release_loaders(loaders, datasets, *partitions):
+    """Give back the host memory held for partitions whose passes are finished.
+
+    Removes each named partition from ``loaders`` and ``datasets`` (missing ones are
+    ignored) and stops its worker processes. Persistent workers otherwise idle until
+    the end of the run, each keeping its own memory plus a copy-on-write snapshot of
+    everything the main process held when the worker was forked. Finally returns
+    PyTorch's cached pinned memory, which ``torch.cuda.empty_cache()`` does not touch:
+    every pinned batch buffer ever allocated stays allocated until this is called.
+    """
+    for partition in partitions:
+        datasets.pop(partition, None)
+        loader = loaders.pop(partition, None)
+        iterator = getattr(loader, '_iterator', None)  # only set while persistent workers are alive
+        if iterator is not None:
+            iterator._shutdown_workers()
+            loader._iterator = None
+    # Public from torch 2.12; the private CUDA-only spelling exists since 2.5. Both only
+    # return buffers that no live tensor is using, so this is safe while a loader is running.
+    empty_host_cache = (getattr(getattr(torch, 'accelerator', None), 'empty_host_cache', None)
+                        or getattr(torch._C, '_host_emptyCache', None))
+    if empty_host_cache is not None and torch.cuda.is_available() and torch.cuda.is_initialized():
+        empty_host_cache()

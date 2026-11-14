@@ -251,50 +251,126 @@ def ensemble_predictions(
     return logits
 
 
-class EmbeddingWriter:
+class _PerVideoWriter:
+    """Collects the chunk rows of one video at a time and hands each finished video to ``_save``.
+
+    Relies on the unshuffled inference loader yielding chunks grouped by video, which
+    ``ClsDataset`` guarantees by construction; raises otherwise.
+    """
+
+    def __init__(self) -> None:
+        self.video: str | None = None
+        self.saved: set[str] = set()
+        self.rows: list[tuple[tuple[str, int, int], np.ndarray]] = []
+
+    def add(self, names: list[tuple[str, int, int]], values: np.ndarray) -> None:
+        """Add a batch of (filename, frame_in_video, frame_in_chunk) names and their (N, D) rows."""
+        for name, row in zip(names, values, strict=True):
+            fn = name[0]
+            if fn != self.video:
+                self._finish_video()
+                if fn in self.saved:
+                    raise ValueError(f"Chunks of {fn!r} are not contiguous; the loader must not be shuffled")
+                self.video = fn
+            self.rows.append((name, row))
+
+    def _finish_video(self) -> None:
+        """Save the current video, if any, and drop its rows."""
+        if self.video is None:
+            return
+        self._save(self.video, self.rows)
+        self.saved.add(self.video)
+        self.video = None
+        self.rows = []
+
+    def _save(self, video: str, rows: list[tuple[tuple[str, int, int], np.ndarray]]) -> None:
+        raise NotImplementedError
+
+
+class EmbeddingWriter(_PerVideoWriter):
     """Writes per-frame embeddings as one ``{filename}.npz`` per video, with keys
     ``embeddings`` (n_frames, D) and ``metadata`` (a JSON string describing the run).
 
     Buffers the current video's chunk rows and, when the next video's chunks begin, runs them
     through ``ensemble_predictions`` exactly like the class predictions (average overlaps, fill
-    gaps) and saves the result. Relies on the unshuffled inference loader yielding chunks grouped
-    by video, which ``ClsDataset`` guarantees by construction; raises otherwise. Call ``close()``
-    after the last batch.
+    gaps) and saves the result. Call ``close()`` after the last batch.
     """
 
     def __init__(self, video_prefix: str, out_path: str, metadata: dict | None = None) -> None:
+        super().__init__()
         os.makedirs(out_path, exist_ok=True)
         self.video_prefix = video_prefix
         self.out_path = out_path
         self.metadata = metadata or {}
-        self.video: str | None = None
-        self.saved: set[str] = set()
-        self.rows: list[tuple[tuple[str, int, int], np.ndarray]] = []
-
-    def add(self, names: list[tuple[str, int, int]], embeddings: np.ndarray) -> None:
-        """Add a batch of (filename, frame_in_video, frame_in_chunk) names and their (N, D) embeddings."""
-        for name, row in zip(names, embeddings, strict=True):
-            fn = name[0]
-            if fn != self.video:
-                self.close()
-                if fn in self.saved:
-                    raise ValueError(f"Chunks of {fn!r} are not contiguous; embeddings need an unshuffled loader")
-                self.video = fn
-            self.rows.append((name, row))
 
     def close(self) -> None:
         """Ensemble and save the current video, if any."""
-        if self.video is None:
-            return
-        n_frames = get_frame_count(os.path.join(self.video_prefix, self.video))
-        dim = self.rows[0][1].shape[0]
-        filled = ensemble_predictions(self.rows, {self.video: np.zeros((n_frames, dim), dtype=np.float32)})
-        metadata = {**self.metadata, 'video': self.video, 'n_frames': int(n_frames), 'n_chunk_rows': len(self.rows)}
-        np.savez(os.path.join(self.out_path, self.video + '.npz'),
-                 embeddings=filled[self.video], metadata=json.dumps(metadata))
-        self.saved.add(self.video)
-        self.video = None
-        self.rows = []
+        self._finish_video()
+
+    def _save(self, video, rows):
+        n_frames = get_frame_count(os.path.join(self.video_prefix, video))
+        dim = rows[0][1].shape[0]
+        filled = ensemble_predictions(rows, {video: np.zeros((n_frames, dim), dtype=np.float32)})
+        metadata = {**self.metadata, 'video': video, 'n_frames': int(n_frames), 'n_chunk_rows': len(rows)}
+        np.savez(os.path.join(self.out_path, video + '.npz'),
+                 embeddings=filled[video], metadata=json.dumps(metadata))
+
+
+class InferenceWriter(_PerVideoWriter):
+    """Writes per-frame predictions to one JSON file, ``{"preds": {filename: [[...], ...]}}``,
+    one video at a time.
+
+    Holds the chunk predictions of the current video only. When the next video's chunks begin,
+    the finished one is ensembled and smoothed exactly as the val/test passes do it
+    (``ensemble_predictions`` then ``postprocess_predictions``), appended to the file and
+    dropped, so memory does not grow with the number of videos.
+
+    ``videos`` is the inference split in loader order; it fixes the order of the file. A video
+    the pass never reached is an error unless ``allow_missing`` is set (truncated ``max_batches``
+    debug runs), in which case it is written as zeros. ``smoothing_window`` (> 1) is the same
+    per-class moving average used at eval/test time.
+
+    The file is built at ``save_fn + '.partial'`` and renamed to ``save_fn`` by ``close()``. If
+    the pass dies, the partial file holds every video finished so far and lacks only the
+    closing ``}}``.
+    """
+
+    def __init__(self, video_prefix: str, videos: list[str], num_classes: int, save_fn: str,
+                 smoothing_window: int | None = None, allow_missing: bool = False) -> None:
+        super().__init__()
+        self.video_prefix = video_prefix
+        self.num_classes = num_classes
+        self.save_fn = save_fn
+        self.smoothing_window = smoothing_window
+        self.allow_missing = allow_missing
+        self.pending = list(videos)
+        self.separator = ''
+        self.file = open(save_fn + '.partial', 'w')
+        self.file.write('{"preds": {')
+
+    def close(self) -> None:
+        """Write the last video and any the pass never reached, then put the file in place."""
+        try:
+            self._finish_video()
+            while self.pending:
+                self._write(self.pending.pop(0), [])
+            self.file.write('}}')
+        finally:
+            self.file.close()
+        os.replace(self.save_fn + '.partial', self.save_fn)
+
+    def _save(self, video, rows):
+        while self.pending[0] != video:  # videos the loader skipped have no predictions
+            self._write(self.pending.pop(0), [])
+        self._write(self.pending.pop(0), rows)
+
+    def _write(self, video, rows):
+        n_frames = get_frame_count(os.path.join(self.video_prefix, video))
+        preds = ensemble_predictions(rows, {video: np.zeros((n_frames, self.num_classes))}, self.allow_missing)
+        preds = postprocess_predictions(preds, self.smoothing_window)
+        self.file.write(f'{self.separator}{json.dumps(video)}: {json.dumps(preds[video].tolist())}')
+        self.file.flush()
+        self.separator = ', '
 
 
 def postprocess_predictions(predictions: dict[str, np.ndarray],
@@ -631,31 +707,3 @@ def generate_video_mismatches(ans, labels_json, partition, prefix, font_color=(2
     for frame in outp_buffer:
         out.write(frame)
     out.release()
-
-
-def save_inference_results(ans, ema_ans, video_prefix, labels_json, save_fn, smoothing_window=None,
-                           allow_missing=False):
-    """Ensemble inference predictions (and EMA predictions if present) into per-frame logits
-    and write them as JSON to save_fn under keys 'preds' and optionally 'ema_preds', each a
-    dict[filename -> list-of-lists]. Frame counts are read from the videos under video_prefix.
-
-    ``smoothing_window`` (> 1) applies the same per-class moving average used at
-    eval/test time to the ensembled inference probabilities.
-    """
-    out = {}
-
-    ans_logits = {}
-    for fn in labels_json['splits']['inference']:
-        ans_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-
-    out['preds'] = postprocess_predictions(ensemble_predictions(ans, ans_logits, allow_missing), smoothing_window)
-    out['preds'] = {k: v.tolist() for k, v in out['preds'].items()}
-
-    if len(ema_ans) > 0:
-        ema_logits = {}
-        for fn in labels_json['splits']['inference']:
-            ema_logits[fn] = np.zeros((get_frame_count(os.path.join(video_prefix, fn)), len(labels_json['class_names'])))
-        out['ema_preds'] = postprocess_predictions(ensemble_predictions(ema_ans, ema_logits, allow_missing), smoothing_window)
-        out['ema_preds'] = {k: v.tolist() for k, v in out['ema_preds'].items()}
-    with open(save_fn, 'w') as f:
-        json.dump(out, f)

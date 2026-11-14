@@ -1,4 +1,4 @@
-from feral.data import build_datasets_and_loaders
+from feral.data import build_datasets_and_loaders, release_loaders
 from feral.loops import train_one_epoch, evaluate, run_inference
 from feral.modeling import build_model, build_training_objects, load_model_from_checkpoint
 from feral.utils import save_model, pick_and_save_best, validate_labels_json, check_environment
@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 import random
 from feral.metrics import generate_empty_logits, ensemble_predictions, postprocess_predictions
-from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, save_inference_results, calculate_f1_metrics, calculate_optimal_f1_metrics, generate_multilabel_raster_plot, compute_optimal_per_class_thresholds
+from feral.metrics import calculate_multiclass_metrics, calc_frame_level_map, generate_raster_plot, InferenceWriter, calculate_f1_metrics, calculate_optimal_f1_metrics, generate_multilabel_raster_plot, compute_optimal_per_class_thresholds
 import sys
 import os
 import logging
@@ -150,6 +150,9 @@ def _run(cfg):
                 **calculate_multiclass_metrics(answers, class_names, 'train'),
                 'train/loss': train_loss,
             }
+            # Scored, so drop it before the val pass: the val workers are forked on their
+            # first pass and would keep a copy of this list for the rest of the run.
+            del answers
             if torch.cuda.is_available():
                 logs['perf/gpu_mem_gb'] = torch.cuda.max_memory_allocated() / 1e9
                 torch.cuda.reset_peak_memory_stats()
@@ -228,6 +231,11 @@ def _run(cfg):
         del optimizer
         del lr_scheduler
         torch.cuda.empty_cache()
+        # Nothing below uses the train/val workers or the last epoch's predictions. Return
+        # that host memory before the test/inference workers are forked.
+        answers = answers_ema = val_preds = val_ema_preds = logs = ema_logs = None
+        train_dataset = train_loader = val_loader = None
+        release_loaders(loaders, datasets, 'train', 'val')
     if inference_loader is None and test_loader is None:
         return
     
@@ -272,16 +280,24 @@ def _run(cfg):
         _add_raster_logs(logs, predictions, labels_json, 'test', 'test', 'test_optimal', cfg['multilabel_threshold'])
         logger.info("%s", logs)
         wandb.log(logs)
+        # Same before the inference workers are forked.
+        answers = predictions = logs = None
+        test_loader = None
+        release_loaders(loaders, datasets, 'test')
 
     if inference_loader is not None:
         logger.info("Running inference...")
-        answers = run_inference(
-            best_model, inference_loader,
-            is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches')
-        )
         out_pth = os.path.join(answers_dir, f"_inference_{cfg['run_name']}_{_str_now()}.json")
-        save_inference_results(answers, [], cfg['data']['prefix'], labels_json, out_pth, smoothing_window=eval_smoothing,
-                               allow_missing=truncated)
+        writer = InferenceWriter(cfg['data']['prefix'], labels_json['splits']['inference'], num_classes, out_pth,
+                                 smoothing_window=eval_smoothing, allow_missing=truncated)
+        run_inference(
+            best_model, inference_loader,
+            is_multilabel=labels_json['is_multilabel'], device=device, max_batches=cfg.get('max_batches'),
+            prediction_writer=writer,
+        )
+        inference_loader = None
+        release_loaders(loaders, datasets, 'inference')
+        writer.close()
        
 
 def main(cfg: dict) -> None:

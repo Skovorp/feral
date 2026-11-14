@@ -1,5 +1,7 @@
+import gc
 import json
 import os
+import weakref
 
 import numpy as np
 import pytest
@@ -7,6 +9,7 @@ import pytest
 import feral.metrics
 from feral.metrics import (
     EmbeddingWriter,
+    InferenceWriter,
     calc_frame_level_map,
     calculate_f1_metrics,
     ensemble_predictions,
@@ -80,6 +83,98 @@ class TestEmbeddingWriter:
         monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: 40)
         writer = EmbeddingWriter("videos", str(tmp_path))
         row = np.zeros((1, 4), dtype=np.float32)
+        writer.add([("a.mp4", 0, 0)], row)
+        writer.add([("b.mp4", 0, 0)], row)
+        with pytest.raises(ValueError, match="not contiguous"):
+            writer.add([("a.mp4", 5, 0)], row)
+
+
+# ===================================================================
+# InferenceWriter
+# ===================================================================
+
+class TestInferenceWriter:
+    # c.mp4's chunks stop short of its last frames, so those are filled from the nearest prediction
+    FRAMES = {"a.mp4": 40, "b.mp4": 25, "c.mp4": 31}
+    CLASSES = 3
+
+    def _chunks(self, rng, videos=None):
+        """Overlapping, strided chunks (length 4, step 3, shift 5) per video, in loader order."""
+        rows = []
+        for fn in videos or self.FRAMES:
+            for start in range(0, self.FRAMES[fn] - 9, 5):
+                rows += [((fn, start + 3 * k, k), rng.random(self.CLASSES).astype(np.float32)) for k in range(4)]
+        return rows
+
+    def _writer(self, tmp_path, monkeypatch, **kwargs):
+        monkeypatch.setattr(feral.metrics, "get_frame_count", lambda path: self.FRAMES[os.path.basename(path)])
+        out = str(tmp_path / "preds.json")
+        return InferenceWriter("videos", list(self.FRAMES), self.CLASSES, out, **kwargs), out
+
+    @staticmethod
+    def _feed(writer, rows, batch=7):
+        for i in range(0, len(rows), batch):  # batches straddle video boundaries
+            part = rows[i:i + batch]
+            writer.add([name for name, _ in part], np.stack([row for _, row in part]))
+
+    def test_file_is_byte_identical_to_ensembling_the_whole_pass_at_once(self, tmp_path, monkeypatch):
+        rows = self._chunks(np.random.default_rng(0))
+        writer, out = self._writer(tmp_path, monkeypatch, smoothing_window=3)
+        self._feed(writer, rows)
+        writer.close()
+
+        whole_pass = postprocess_predictions(
+            ensemble_predictions(rows, {fn: np.zeros((n, self.CLASSES)) for fn, n in self.FRAMES.items()}), 3)
+        expected = json.dumps({"preds": {fn: arr.tolist() for fn, arr in whole_pass.items()}})
+        with open(out) as f:
+            assert f.read() == expected
+        assert os.listdir(tmp_path) == ["preds.json"]  # nothing half-written left behind
+
+    def test_chunks_of_a_finished_video_are_released(self, tmp_path, monkeypatch):
+        rows = self._chunks(np.random.default_rng(0))
+        a_rows = [row for row in rows if row[0][0] == "a.mp4"]
+        b_first = next(row for row in rows if row[0][0] == "b.mp4")
+        writer, _ = self._writer(tmp_path, monkeypatch)
+        batch = np.stack([row for _, row in a_rows])
+        writer.add([name for name, _ in a_rows], batch)
+        held = weakref.ref(batch)
+        del batch
+
+        writer.add([b_first[0]], b_first[1][None])  # b starts, so a is complete
+
+        gc.collect()
+        assert held() is None
+
+    def test_finished_videos_are_on_disk_while_the_pass_is_still_running(self, tmp_path, monkeypatch):
+        rows = self._chunks(np.random.default_rng(0), videos=["a.mp4", "b.mp4"])
+        writer, out = self._writer(tmp_path, monkeypatch)
+        self._feed(writer, rows)  # a is complete, b is still open
+
+        assert not os.path.exists(out)  # the final name appears only once the pass is complete
+        only_a = ensemble_predictions([r for r in rows if r[0][0] == "a.mp4"], {"a.mp4": np.zeros((40, self.CLASSES))})
+        with open(out + ".partial") as f:
+            assert f.read() == '{"preds": {"a.mp4": ' + json.dumps(only_a["a.mp4"].tolist())
+
+    def test_video_without_predictions_is_an_error(self, tmp_path, monkeypatch):
+        writer, out = self._writer(tmp_path, monkeypatch)
+        self._feed(writer, self._chunks(np.random.default_rng(0), videos=["a.mp4", "b.mp4"]))
+        with pytest.raises(ValueError, match="No predictions for video 'c.mp4'"):
+            writer.close()
+        assert not os.path.exists(out)
+
+    def test_truncated_pass_writes_zeros_for_videos_it_never_reached(self, tmp_path, monkeypatch):
+        writer, out = self._writer(tmp_path, monkeypatch, allow_missing=True)
+        self._feed(writer, self._chunks(np.random.default_rng(0), videos=["a.mp4"]))
+        writer.close()
+        with open(out) as f:
+            preds = json.load(f)["preds"]
+        assert list(preds) == ["a.mp4", "b.mp4", "c.mp4"]
+        assert preds["b.mp4"] == [[0.0] * self.CLASSES] * 25
+        assert preds["c.mp4"] == [[0.0] * self.CLASSES] * 31
+
+    def test_video_split_across_the_pass_is_refused(self, tmp_path, monkeypatch):
+        writer, _ = self._writer(tmp_path, monkeypatch)
+        row = np.full((1, self.CLASSES), 0.5, dtype=np.float32)
         writer.add([("a.mp4", 0, 0)], row)
         writer.add([("b.mp4", 0, 0)], row)
         with pytest.raises(ValueError, match="not contiguous"):

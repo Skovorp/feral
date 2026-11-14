@@ -25,6 +25,22 @@ def read_range_video_decord(path: str, frames: list[int], width: int = -1,
     return torch.from_numpy(video).permute(0, 3, 1, 2)
 
 
+_MEAN = (0.485, 0.456, 0.406)  # vjepa
+_STD = (0.229, 0.224, 0.225)
+_SCALE = 0.00392156862745098  # 1 / 255
+
+
+def normalize_frames(frames: torch.Tensor) -> torch.Tensor:
+    """Turn uint8 frames (..., C, H, W) into the float32 input the model expects:
+    scaled to [0, 1], then normalized with the ImageNet mean/std.
+
+    Runs on whatever device ``frames`` is on. The loops call it once a batch is on the
+    model's device, so loader workers, shared memory and pinned memory carry one byte
+    per value instead of four.
+    """
+    return torchvision.transforms.v2.functional.normalize(frames * _SCALE, _MEAN, _STD, inplace=True)
+
+
 def compute_decode_size(orig_w: int, orig_h: int, resize_to: int,
                         resize_style: str) -> tuple[int, int]:
     """Target (width, height) for decord decode-time resize, matching
@@ -130,9 +146,6 @@ class ClsDataset():
             self.aug = TrivialAugmentWide()
         else:
              self.aug = None
-
-        self.norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)) # vjepa
-        self.scale = 0.00392156862745098
 
         if part_sample < 1.0 and partition == 'train':
             if subsample_keep_rare_threshold is None:
@@ -241,14 +254,14 @@ class ClsDataset():
         return read_range_video_decord(pth, frames, width=w, height=h), [(fn, frames[i], i) for i in range(len(frames))]
 
     def get_item_simple(self, index):
-        """Load, augment, scale and normalize a chunk for the given index.
+        """Load and augment a chunk for the given index.
 
         Returns ``(video, label)`` for train, ``(video, label, names)`` for
-        val/test, and ``(video, names)`` for inference.
+        val/test, and ``(video, names)`` for inference. ``video`` stays uint8;
+        ``normalize_frames`` converts it once the batch is on the model's device.
         """
         video, names = self.get_video(index)
-        video = video if self.aug is None else self.aug(video)
-        outputs = self.norm(video * self.scale)
+        outputs = video if self.aug is None else self.aug(video)
         if self.partition != "inference":
             label = self.labels[index]
             label = self.proc_target(label)

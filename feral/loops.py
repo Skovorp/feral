@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from feral.dataset import normalize_frames
 from feral.utils import prep_for_answers
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, *,
 
     for i, (data, target) in enumerate(tqdm(loader, total=len(loader))):
         t_data = time.perf_counter() - t_end  # dataloader wait (input-bound probe)
-        data = data.to(device)
+        data = normalize_frames(data.to(device))
         target = target.to(device)
 
         # Eye matrix for mixup; sized to actual batch (multi-GPU safe).
@@ -186,7 +187,7 @@ def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
 
     with torch.no_grad():
         for i, (data, target, names) in enumerate(tqdm(loader, total=len(loader))):
-            data = data.to(device)
+            data = normalize_frames(data.to(device))
             target = target.to(device)
             target = target.view(-1, num_classes)
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
@@ -203,28 +204,31 @@ def evaluate(model, loader, criterion=None, *, num_classes, is_multilabel,
     return answers, avg_loss
 
 
-def run_inference(model, loader, *, is_multilabel, device, max_batches=None, embedding_writer=None):
-    """Run model over an unlabeled loader. Returns answers.
+def run_inference(model, loader, *, is_multilabel, device, prediction_writer, max_batches=None,
+                  embedding_writer=None):
+    """Run model over an unlabeled loader, handing each batch's per-frame probabilities to
+    ``prediction_writer`` (an InferenceWriter) as it goes.
+
+    Nothing is collected here: the writer ensembles and saves each video once its chunks are
+    complete, so memory does not grow with the number of videos.
 
     embedding_writer: optional EmbeddingWriter that receives each batch's
             attention-pooled per-frame embeddings.
     """
     model.eval()
-    answers = []
 
     with torch.no_grad():
         for i, (data, names) in enumerate(tqdm(loader, total=len(loader))):
-            data = data.to(device)
+            data = normalize_frames(data.to(device))
+            names = [n for item in names for n in item]
             with torch.amp.autocast(dtype=torch.bfloat16, device_type="cuda"):
                 if embedding_writer is None:
                     output = model(data)
                 else:
                     output, embeddings = model(data, return_embeddings=True)
-                    embedding_writer.add([n for item in names for n in item], embeddings.float().cpu().numpy())
+                    embedding_writer.add(names, embeddings.float().cpu().numpy())
                 output_prob = _to_prob(output, is_multilabel)
-                answers.extend(prep_for_answers(output_prob, None, names))
+            prediction_writer.add(names, output_prob.float().cpu().numpy())
 
             if max_batches is not None and i + 1 >= max_batches:
                 break
-
-    return answers

@@ -20,7 +20,7 @@ from feral.dataset import (
     collate_fn_inference,
 )
 from feral.loops import run_inference
-from feral.metrics import EmbeddingWriter, save_inference_results
+from feral.metrics import EmbeddingWriter, InferenceWriter
 from feral.modeling import load_model_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s",
@@ -210,18 +210,19 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
         metadata = _embeddings_metadata(checkpoint_path, cfg, class_names, is_multilabel,
                                         video_folder, mode, resolution)
         embedding_writer = EmbeddingWriter(video_folder, save_embeddings, metadata)
-    answers = run_inference(model, loader, is_multilabel=is_multilabel, device=device,
-                            embedding_writer=embedding_writer)
-    if embedding_writer is not None:
-        embedding_writer.close()
-        logger.info("Embeddings saved to %s", save_embeddings)
-
     if output is None:
         folder_name = os.path.basename(os.path.normpath(video_folder))
         output = f"inference_{folder_name}.json"
 
     os.makedirs(os.path.dirname(output) or '.', exist_ok=True)
-    save_inference_results(answers, [], video_folder, labels_json, output, smoothing_window=smoothing_window)
+    writer = InferenceWriter(video_folder, labels_json['splits']['inference'], num_classes, output,
+                             smoothing_window=smoothing_window)
+    run_inference(model, loader, is_multilabel=is_multilabel, device=device,
+                  prediction_writer=writer, embedding_writer=embedding_writer)
+    writer.close()
+    if embedding_writer is not None:
+        embedding_writer.close()
+        logger.info("Embeddings saved to %s", save_embeddings)
     logger.info("Results saved to %s", output)
 
 

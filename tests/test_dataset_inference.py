@@ -59,13 +59,40 @@ def test_augmentation_is_training_only(monkeypatch, partition, do_aa):
     assert (ds.aug is not None) == (partition == 'train' and do_aa)
 
 
-def test_inference_scales_uint8_then_normalizes(monkeypatch):
-    ds = make_dataset(monkeypatch)
+@pytest.mark.parametrize('partition', ['train', 'val', 'test', 'inference'])
+def test_dataset_items_stay_uint8(monkeypatch, partition):
+    # Frames travel through the loader queue as bytes; float32 there costs 4x the host RAM.
+    ds = make_dataset(monkeypatch, partition=partition, n_frames=4, do_aa=False)
     pixels = torch.tensor([0, 128, 255], dtype=torch.uint8).reshape(1, 3, 1, 1).expand(4, 3, 8, 8)
     monkeypatch.setattr(ds, 'get_video', lambda index: (pixels, []))
-    actual, _ = ds[0]
+    actual = ds[0][0]
+    assert actual.dtype == torch.uint8
+    assert torch.equal(actual, pixels)
+
+
+@pytest.mark.parametrize('lead', [(4,), (2, 4)], ids=['chunk', 'batch'])
+def test_normalize_frames_scales_uint8_then_normalizes(lead):
+    pixels = torch.tensor([0, 128, 255], dtype=torch.uint8).reshape(3, 1, 1).expand(*lead, 3, 8, 8)
+    actual = dataset.normalize_frames(pixels)
     expected = (torch.tensor([0., 128. / 255., 1.]) - torch.tensor([.485, .456, .406])) / torch.tensor([.229, .224, .225])
-    torch.testing.assert_close(actual, expected.reshape(1, 3, 1, 1).expand_as(actual))
+    assert actual.dtype == torch.float32
+    torch.testing.assert_close(actual, expected.reshape(3, 1, 1).expand_as(actual))
+
+
+def _normalized_in_the_worker(video):
+    """What ClsDataset did per chunk before normalization moved after the device transfer."""
+    import torchvision
+    norm = torchvision.transforms.v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    return norm(video * 0.00392156862745098)
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='needs CUDA'))])
+def test_normalize_frames_is_bit_identical_to_the_old_worker_side_result(device):
+    video = torch.randint(0, 256, (2, 8, 3, 32, 32), dtype=torch.uint8, generator=torch.Generator().manual_seed(0))
+    expected = torch.stack([_normalized_in_the_worker(chunk) for chunk in video])
+    actual = dataset.normalize_frames(video.to(device)).cpu()
+    assert torch.equal(actual, expected)
 
 
 def test_short_inference_padding_with_temporal_stride(monkeypatch):

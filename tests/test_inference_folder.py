@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import types
 
 import numpy as np
 import pytest
@@ -131,8 +132,8 @@ def test_inference_uses_stored_cfg_not_default(trained_checkpoint, monkeypatch):
     monkeypatch.setattr(inf_mod, '_load_default_cfg', boom)
 
     # Stub the actual forward pass — we only care about cfg plumbing here.
-    monkeypatch.setattr(inf_mod, 'run_inference', lambda *a, **k: {})
-    monkeypatch.setattr(inf_mod, 'save_inference_results', lambda *a, **k: None)
+    monkeypatch.setattr(inf_mod, 'run_inference', lambda *a, **k: None)
+    monkeypatch.setattr(inf_mod, 'InferenceWriter', lambda *a, **k: types.SimpleNamespace(close=lambda: None))
 
     with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
         output_path = f.name

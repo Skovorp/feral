@@ -109,7 +109,7 @@ BACKBONES = {
     },
 }
 
-# ImageNet mean/std the dataset normalizes with (see ClsDataset.norm). Used to
+# ImageNet mean/std the loops normalize with (see dataset.normalize_frames). Used to
 # denormalize before forwarding into VideoPrism, which expects raw [0, 1].
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)

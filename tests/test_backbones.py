@@ -19,6 +19,7 @@ import yaml
 
 from feral.backbones import BACKBONES
 from feral.data import build_datasets_and_loaders
+from feral.dataset import normalize_frames
 from feral.model import FeralModel
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -100,7 +101,7 @@ def test_backbone_forward(backbone_key, train_batches, cuda_cleanup):
     # feral.train leaves only the flash attention kernel enabled on CUDA, and it needs
     # half-precision input, so match the bf16 autocast that training and inference use.
     with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
-        out = model(x_cpu.to(device))
+        out = model(normalize_frames(x_cpu.to(device)))
 
     B = x_cpu.shape[0]
     assert out.shape == (B * predict_per_item, num_classes), (

@@ -8,6 +8,7 @@ previous pass's answers). PyTorch also keeps every pinned batch buffer it ever a
 import gc
 import json
 import multiprocessing
+import os
 import weakref
 
 import pytest
@@ -82,7 +83,8 @@ class _Answers(list):
     """A list that can be weakly referenced, standing in for one pass's predictions."""
 
 
-def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_path, monkeypatch):
+@pytest.mark.parametrize('train_first', [True, False])
+def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_path, monkeypatch, train_first):
     import feral.train as train
     from feral import load_default_config
 
@@ -91,7 +93,7 @@ def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_p
               'splits': {'train': ['a.mp4'], 'val': ['b.mp4'], 'test': ['c.mp4'], 'inference': ['d.mp4']}}
     path = tmp_path / 'labels.json'
     path.write_text(json.dumps(labels))
-    cfg.update(run_name='test', device='cpu')
+    cfg.update(run_name='test', device='cpu', starting_checkpoint='existing.pt')
     cfg['data']['label_json'] = path
     cfg['data']['prefix'] = str(tmp_path)
     cfg['training']['epochs'] = 1
@@ -99,7 +101,8 @@ def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_p
     monkeypatch.chdir(tmp_path)
 
     baseline = set(multiprocessing.active_children())
-    loaders = {name: _persistent_loader() for name in ('train', 'val', 'test', 'inference')}
+    phases = ('train', 'val', 'test', 'inference') if train_first else ('test', 'inference')
+    loaders = {name: _persistent_loader() for name in phases}
     datasets = {name: loader.dataset for name, loader in loaders.items()}
     created = list(loaders.values())
 
@@ -119,13 +122,17 @@ def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_p
         produced[phase] = weakref.ref(answers)
         return answers
 
-    eval_phases = iter(['val', 'test'])
+    eval_phases = iter(['val', 'test'] if train_first else ['test'])
+    loaded_checkpoints = []
+    def load_checkpoint(cfg, device, path, **kwargs):
+        loaded_checkpoints.append(path)
+        return object(), None
     monkeypatch.setattr(train, 'check_environment', lambda **kw: None)
     monkeypatch.setattr(train, 'validate_labels_json', lambda *a: None)
     monkeypatch.setattr(train, 'build_datasets_and_loaders', lambda *a: (datasets, loaders))
     monkeypatch.setattr(train, 'build_model', lambda *a: (object(), None))
     monkeypatch.setattr(train, 'build_training_objects', lambda *a: (None, None, None, None))
-    monkeypatch.setattr(train, 'load_model_from_checkpoint', lambda *a, **kw: (object(), None))
+    monkeypatch.setattr(train, 'load_model_from_checkpoint', load_checkpoint)
     monkeypatch.setattr(train, 'pick_and_save_best', lambda *a: (0.5, 'base'))
     monkeypatch.setattr(train.wandb, 'init', lambda **kw: None)
     monkeypatch.setattr(train.wandb, 'run', None)
@@ -152,7 +159,7 @@ def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_p
     finally:
         _stop(created)
 
-    assert seen == {
+    expected = {
         'train': {'workers': 0, 'answers': []},
         # the train loader is reused next epoch, so its worker stays; its answers are already scored
         'val': {'workers': 1, 'answers': []},
@@ -161,3 +168,8 @@ def test_each_phase_starts_without_the_previous_phases_workers_and_answers(tmp_p
         # the result file is finished after the inference workers are gone
         'save': {'workers': 0, 'answers': []},
     }
+    if not train_first:
+        del expected['train'], expected['val']
+    assert seen == expected
+    expected_checkpoint = os.path.join('.', 'checkpoints', 'test_best_checkpoint.pt') if train_first else 'existing.pt'
+    assert loaded_checkpoints == [expected_checkpoint]

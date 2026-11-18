@@ -121,6 +121,7 @@ def _run(cfg):
     inference_loader = loaders.get('inference')
 
     device = torch.device(cfg.get('device', 'cuda'))
+    test_checkpoint_path = cfg.get('starting_checkpoint')
 
     if train_loader is not None:
         model, model_ema = build_model(cfg, num_classes, device)
@@ -131,6 +132,7 @@ def _run(cfg):
         )
 
         best_checkpoint_path = os.path.join(checkpoints_dir, f"{cfg['run_name']}_best_checkpoint.pt")
+        test_checkpoint_path = best_checkpoint_path
         best_map = -1
         epochs_without_updates = 0
 
@@ -240,11 +242,6 @@ def _run(cfg):
         return
     
     logger.info("Loading model for test/inference")
-    if train_loader is not None:
-        test_checkpoint_path = best_checkpoint_path
-    else:
-        test_checkpoint_path = cfg['starting_checkpoint']
-    
     best_model, _checkpoint_meta = load_model_from_checkpoint(cfg, device, test_checkpoint_path, num_classes=num_classes)
 
     if test_loader is not None:

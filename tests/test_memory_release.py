@@ -67,7 +67,9 @@ def test_release_loaders_returns_cached_pinned_memory():
     from feral.data import release_loaders
 
     def held():
-        return torch.cuda.host_memory_stats()["allocated_bytes.current"]
+        # allocated_bytes counts live tensors and falls to zero at `del batch`.
+        # reserved_bytes also includes the cached blocks this test must release.
+        return torch.cuda.host_memory_stats()["reserved_bytes.current"]
 
     torch.zeros(1, device='cuda')  # as in a real run, where the model is already on the GPU
     batch = torch.zeros(48 * MiB, dtype=torch.uint8).pin_memory()

@@ -1,20 +1,20 @@
 """Run inference on all videos in a folder using a saved checkpoint."""
 import datetime
 import hashlib
-import importlib.resources
 import json
 import logging
 import os
 import sys
 
 import torch
-import yaml
 from torch.utils.data import DataLoader
-
-_DEFAULT_CONFIG = importlib.resources.files("feral").joinpath("default_config.yaml")
 
 import feral
 from feral.backbones import get_hidden_dim
+from feral.checkpoints import (
+    checkpoint_metadata, legacy_inference_config, normalize_checkpoint_config,
+    read_checkpoint,
+)
 from feral.dataset import (
     ClsDataset,
     collate_fn_inference,
@@ -57,10 +57,8 @@ def build_inference_labels_json(video_filenames, class_names, is_multilabel):
 
 
 def _load_default_cfg():
-    """Load and return the packaged default_config.yaml as a dict."""
-    with importlib.resources.as_file(_DEFAULT_CONFIG) as cfg_path:
-        with open(cfg_path, 'r') as f:
-            return yaml.safe_load(f)
+    """Return the historical defaults for checkpoints that predate embedded cfg."""
+    return legacy_inference_config()
 
 
 def _sha256(path, chunk_bytes=1 << 24):
@@ -99,36 +97,53 @@ def _embeddings_metadata(checkpoint_path, cfg, class_names, is_multilabel, video
 
 def run_inference_folder(checkpoint_path, video_folder, output=None,
                          batch_size=8, num_workers=4, compile=False,
-                         mode=None, resolution=None, save_embeddings=None):
+                         mode=None, resolution=None, save_embeddings=None,
+                         labels_json=None, training_cfg=None):
     """Run inference on every video in video_folder using a saved checkpoint and write results to JSON.
 
     Reads the training cfg embedded in the checkpoint (falling back to
-    default_config.yaml for legacy checkpoints), applies optional inference-time
+    historical inference defaults for legacy checkpoints), applies optional inference-time
     overrides (compile, mode -> chunk_shift, resolution -> resize_to), loads the
     model and its class metadata, builds a chunk dataset/loader, runs inference,
     and saves results to `output` (defaults to inference_<folder>.json). With
     `save_embeddings`, also writes one `{filename}.npz` per video to that folder, holding
     the (frames, hidden_dim) attention-pooled per-frame embeddings and a JSON metadata
-    string recording the checkpoint and settings that produced them.
+    string recording the checkpoint and settings that produced them. For old
+    checkpoints, ``labels_json`` is the original labels.json path (class metadata
+    only), and ``training_cfg`` can supply the original config dict when none was
+    saved. Embedded cfg remains authoritative.
     """
     # Peek at the checkpoint to grab the training cfg (saved since v0.2.1).
-    # Falling back to default_config only covers legacy checkpoints where the
-    # cfg wasn't persisted — the data/model params in default_config may not
-    # match how the model was actually trained.
-    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    raw = read_checkpoint(checkpoint_path)
     stored_cfg = raw.get('cfg') if isinstance(raw, dict) else None
     if stored_cfg is not None:
         cfg = stored_cfg
         logger.info("Using training cfg embedded in checkpoint")
+    elif training_cfg is not None:
+        cfg = training_cfg
+        logger.info("Using supplied training cfg for legacy checkpoint")
     else:
         logger.warning(
             "Checkpoint has no embedded training cfg (legacy format). Falling "
-            "back to default_config.yaml — model/data params may not match how "
-            "this checkpoint was trained."
+            "back to the historical Feral inference defaults (V-JEPA 2 ViT-L, "
+            "64 frames, 256px). For custom training settings, supply the original "
+            "training_cfg to run_inference_folder."
         )
         cfg = _load_default_cfg()
 
+    cfg = normalize_checkpoint_config(cfg)
     cfg['training']['compile'] = compile
+
+    label_metadata = None
+    if labels_json is not None:
+        with open(labels_json) as f:
+            label_metadata = json.load(f)
+    metadata = checkpoint_metadata(raw, label_metadata)
+    if metadata is None:
+        raise ValueError(
+            'This checkpoint has no class_names/is_multilabel. Provide the original '
+            'labels.json with --labels-json labels.json; retraining is not required.'
+        )
 
     # Inference uses the eval-time chunk overlap (eval_chunk_shift) and per-frame
     # smoothing (eval_smoothing_window) the checkpoint was configured with, so a
@@ -165,13 +180,10 @@ def run_inference_folder(checkpoint_path, video_folder, output=None,
     video_filenames = find_videos(video_folder)
 
     # Load model and extract metadata
-    model, metadata = load_model_from_checkpoint(cfg, device, checkpoint_path)
-    if metadata is None:
-        raise SystemExit(
-            "This checkpoint is in the legacy format (bare state_dict) and does not "
-            "contain class_names or is_multilabel. Please use a checkpoint saved with "
-            "the new format, or provide a labels.json and use the full training pipeline."
-        )
+    model, metadata = load_model_from_checkpoint(
+        cfg, device, checkpoint_path, checkpoint=raw, labels_json=label_metadata,
+    )
+    del raw  # release the CPU weight copy before decoding videos
     class_names = metadata['class_names']
     is_multilabel = metadata['is_multilabel']
     num_classes = len(class_names)

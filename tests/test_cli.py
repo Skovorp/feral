@@ -195,6 +195,16 @@ class TestMainParsing:
         with pytest.raises(SystemExit):
             _run_main(monkeypatch, ["infer", str(ckpt), str(tmp_path / "nope")])
 
+    def test_infer_legacy_labels(self, monkeypatch, dispatch, tmp_path):
+        ckpt = tmp_path / 'model.pt'
+        ckpt.touch()
+        labels = tmp_path / 'labels.json'
+        labels.write_text('{}')
+        _run_main(monkeypatch, ['infer', str(ckpt), str(tmp_path), '--labels-json', str(labels)])
+        assert dispatch['args'].labels_json == str(labels)
+        with pytest.raises(SystemExit):
+            _run_main(monkeypatch, ['infer', str(ckpt), str(tmp_path), '--labels-json', str(tmp_path / 'missing.json')])
+
     def test_train_config_valid_dispatch(self, monkeypatch, dispatch, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text("a: 1\n")
@@ -230,13 +240,13 @@ class TestCmdInfer:
         args = argparse.Namespace(
             checkpoint="ck.pt", video_folder="vf", output="out.json",
             batch_size=16, num_workers=2, compile=True, mode="max", resolution=384,
-            save_embeddings="emb",
+            save_embeddings="emb", labels_json="labels.json",
         )
         cli._cmd_infer(args)
         assert recorded == dict(
             checkpoint_path="ck.pt", video_folder="vf", output="out.json",
             batch_size=16, num_workers=2, compile=True, mode="max", resolution=384,
-            save_embeddings="emb",
+            save_embeddings="emb", labels_json="labels.json",
         )
 
     def test_compile_defaults_false_when_absent(self, monkeypatch):
@@ -248,6 +258,7 @@ class TestCmdInfer:
         )
         cli._cmd_infer(args)
         assert recorded["compile"] is False
+        assert recorded["labels_json"] is None
 
 
 # ── _cmd_train_config ─────────────────────────────────────────────────────────

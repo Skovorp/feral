@@ -158,6 +158,7 @@ def _cmd_infer(args):
         mode=args.mode,
         resolution=args.resolution,
         save_embeddings=args.save_embeddings,
+        labels_json=getattr(args, 'labels_json', None),
     )
 
 
@@ -300,6 +301,8 @@ def main():
     p_infer = subparsers.add_parser('infer', help='Run inference on a folder of videos')
     p_infer.add_argument('checkpoint', help='Path to a model checkpoint')
     p_infer.add_argument('video_folder', help='Path to folder containing videos')
+    p_infer.add_argument('--labels-json', dest='labels_json', default=None,
+                         help='Original labels.json for old checkpoints without class metadata; no retraining needed')
     p_infer.add_argument('--output', '-o', default=None,
                          help='Output JSON path (default: inference_<folder_name>.json)')
     p_infer.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size (default: 8)')
@@ -353,6 +356,8 @@ def main():
             parser.error(f"Checkpoint not found: {args.checkpoint}")
         if not os.path.isdir(args.video_folder):
             parser.error(f"Video folder not found: {args.video_folder}")
+        if args.labels_json is not None and not os.path.isfile(args.labels_json):
+            parser.error(f"Labels JSON not found: {args.labels_json}")
 
     if args.command == 'train-config':
         if not os.path.isfile(args.config):

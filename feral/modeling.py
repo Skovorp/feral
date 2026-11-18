@@ -7,6 +7,10 @@ from torchvision.transforms.v2 import MixUp
 from transformers import get_cosine_schedule_with_warmup
 
 from feral.backbones import warn_if_resize_mismatch
+from feral.checkpoints import (
+    checkpoint_metadata, checkpoint_state_dict, normalize_checkpoint_config,
+    read_checkpoint,
+)
 from feral.model import FeralModel
 from feral.utils import get_weights
 
@@ -19,6 +23,7 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
     Returns (model, model_ema). model_ema is None if cfg['ema_decay'] is None
     or with_ema is False.
     """
+    cfg = normalize_checkpoint_config(cfg)
     warn_if_resize_mismatch(cfg)
     model = FeralModel(
         backbone=cfg['backbone'],
@@ -41,11 +46,13 @@ def build_model(cfg, num_classes, device, *, with_ema=True):
     return model, model_ema
 
 
-def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
+def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None, *,
+                               checkpoint=None, labels_json=None):
     """Build a fresh model and load weights from checkpoint_path.
 
-    Supports both new-style checkpoints (dict with 'state_dict', 'class_names',
-    'is_multilabel') and legacy checkpoints (bare state_dict).
+    Supports all published Feral layouts and bare state_dicts, including old
+    HFModel keys and compile/DDP wrappers. ``checkpoint`` can reuse an already
+    loaded dictionary; ``labels_json`` supplies missing legacy class metadata.
 
     For new-style checkpoints, num_classes is derived from the metadata and the
     argument is ignored. For legacy checkpoints, num_classes must be provided.
@@ -53,15 +60,10 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
     Returns (model, metadata) where metadata is a dict with 'class_names' and
     'is_multilabel', or None for legacy checkpoints.
     """
-    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-
-    if isinstance(raw, dict) and 'state_dict' in raw:
-        state_dict = raw['state_dict']
-        metadata = {
-            'class_names': raw['class_names'],
-            'is_multilabel': raw['is_multilabel'],
-            'cfg': raw.get('cfg'),
-        }
+    raw = read_checkpoint(checkpoint_path) if checkpoint is None else checkpoint
+    state_dict = checkpoint_state_dict(raw)
+    metadata = checkpoint_metadata(raw, labels_json)
+    if metadata is not None:
         num_classes = len(metadata['class_names'])
     else:
         logging.warning(
@@ -71,21 +73,22 @@ def load_model_from_checkpoint(cfg, device, checkpoint_path, num_classes=None):
         )
         if num_classes is None:
             raise ValueError(
-                f"Checkpoint '{checkpoint_path}' is legacy format and num_classes was not provided."
+                f"Checkpoint '{checkpoint_path}' has no class metadata. Provide "
+                "--labels-json labels.json for feral infer, or num_classes to this loader."
             )
-        state_dict = raw
-        metadata = None
 
+    cfg = normalize_checkpoint_config(cfg)
     warn_if_resize_mismatch(cfg)
+    model_cfg = {**cfg['model'], 'pretrained': False}
     model = FeralModel(
         backbone=cfg['backbone'],
         num_classes=num_classes,
         predict_per_item=cfg['predict_per_item'],
-        **cfg['model'],
+        **model_cfg,
     )
     try:
         model.load_state_dict(state_dict)
-    except RuntimeError as e:
+    except RuntimeError:
         logging.error(
             "Checkpoint '%s' does not match the current model. "
             "This usually means the checkpoint was saved from a different model "
